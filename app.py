@@ -13,7 +13,7 @@ def index():
     return "TF model is live!"
 
 
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["POST","GET"])
 def predict():
     global model
     if model is None:
