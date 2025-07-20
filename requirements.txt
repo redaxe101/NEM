@@ -1,4 +1,6 @@
 flask
 gunicorn
+joblib
 numpy
+scikit-learn
 tensorflow
