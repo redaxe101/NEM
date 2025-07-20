@@ -6,6 +6,9 @@ import joblib
 import threading
 import time
 from datetime import datetime
+import warnings
+
+warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
 
 latest_prediction = None
 latest_timestamp = None
