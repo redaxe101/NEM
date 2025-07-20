@@ -25,14 +25,38 @@ def build_encoder_input_from_aemo():
     # Fetch latest NEM/AEMO data
     # Preprocess into shape (1, 48, 14)
     # Return as np.float32
-    pass
+
+    # === Dummy encoder input: (1, 48, 14) ===
+    encoder_input_raw = np.random.rand(1, 48, 14)
+
+    # Scale each 14-feature row by embedding into a 49-feature dummy row
+    encoder_scaled = []
+    num_features = feature_scaler.n_features_in_
+    for row in encoder_input_raw[0]:
+        full_row = np.zeros((num_features,))
+        full_row[:14] = row  # Assuming encoder features are first 14
+        full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
+        encoder_scaled.append(full_row_scaled[:14])  # take back only 14 features
+    encoder_input = np.expand_dims(np.array(encoder_scaled), axis=0).astype(np.float32)
+    return encoder_input
 
 
 def build_decoder_input_from_aemo():
     # Fetch forecast/predisp data
     # Preprocess into shape (1, 32, 35)
     # Return as np.float32
-    pass
+    num_features = feature_scaler.n_features_in_
+    # === Dummy decoder input: (1, 32, 35) ===
+    decoder_input_raw = np.random.rand(1, 32, 35)
+
+    decoder_scaled = []
+    for row in decoder_input_raw[0]:
+        full_row = np.zeros((num_features,))
+        full_row[:35] = row  # Assuming decoder features are first 35
+        full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
+        decoder_scaled.append(full_row_scaled[:35])  # take back only 35 features
+    decoder_input = np.expand_dims(np.array(decoder_scaled), axis=0).astype(np.float32)
+    return decoder_input
 
 
 def fetch_and_predict_loop():
@@ -69,7 +93,7 @@ def fetch_and_predict_loop():
         except Exception as e:
             print("❌ Error in prediction loop:", e)
 
-        time.sleep(300)  # Wait 5 minutes (300 seconds)
+        time.sleep(1800)
 
 
 @app.route("/")
