@@ -101,7 +101,7 @@ def fetch_and_predict_loop():
 
 @app.route("/")
 def index():
-    return "TF model is live!"
+    return "NEM spot price predictor by Mark Sinclair, 2025. <a href='predict'>NSW1</a>"
 
 
 @app.route("/healthz")
@@ -120,63 +120,6 @@ def predict():
             "predictions": latest_prediction,
         }
     )
-
-
-@app.route("/predictold", methods=["GET"])
-def predictold():
-    global model
-    try:
-        if model is None:
-            return jsonify({"error": "Model not loaded"}), 500
-
-        num_features = feature_scaler.n_features_in_  # 49
-        rrp_index = all_feature_cols.index("RRP")
-        output_steps = 32
-
-        # === Dummy encoder input: (1, 48, 14) ===
-        encoder_input_raw = np.random.rand(1, 48, 14)
-
-        # Scale each 14-feature row by embedding into a 49-feature dummy row
-        encoder_scaled = []
-        for row in encoder_input_raw[0]:
-            full_row = np.zeros((num_features,))
-            full_row[:14] = row  # Assuming encoder features are first 14
-            full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
-            encoder_scaled.append(full_row_scaled[:14])  # take back only 14 features
-        encoder_input = np.expand_dims(np.array(encoder_scaled), axis=0).astype(
-            np.float32
-        )
-
-        # === Dummy decoder input: (1, 32, 35) ===
-        decoder_input_raw = np.random.rand(1, 32, 35)
-
-        decoder_scaled = []
-        for row in decoder_input_raw[0]:
-            full_row = np.zeros((num_features,))
-            full_row[:35] = row  # Assuming decoder features are first 35
-            full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
-            decoder_scaled.append(full_row_scaled[:35])  # take back only 35 features
-        decoder_input = np.expand_dims(np.array(decoder_scaled), axis=0).astype(
-            np.float32
-        )
-
-        # === Predict ===
-        preds_scaled = model.predict(
-            [encoder_input, decoder_input]
-        )  # shape: (1, 32, 1)
-        preds_scaled = preds_scaled.reshape(-1)  # (32,)
-
-        # === Unscale predictions using dummy full-feature rows ===
-        X_dummy = np.zeros((output_steps, num_features), dtype=np.float32)
-        X_dummy[:, rrp_index] = preds_scaled
-        preds_unscaled = feature_scaler.inverse_transform(X_dummy)[
-            :, rrp_index
-        ].tolist()
-
-        return jsonify({"predictions": preds_unscaled})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 threading.Thread(target=fetch_and_predict_loop, daemon=True).start()
