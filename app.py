@@ -5,6 +5,8 @@ import os
 import joblib
 import threading
 import time
+import pandas as pd
+import requests
 from datetime import datetime
 import warnings
 
@@ -45,20 +47,30 @@ def build_encoder_input_from_aemo():
 
 
 def build_decoder_input_from_aemo():
-    # Fetch forecast/predisp data
-    # Preprocess into shape (1, 32, 35)
-    # Return as np.float32
-    num_features = feature_scaler.n_features_in_
-    # === Dummy decoder input: (1, 32, 35) ===
-    decoder_input_raw = np.random.rand(1, 32, 35)
 
-    decoder_scaled = []
-    for row in decoder_input_raw[0]:
-        full_row = np.zeros((num_features,))
-        full_row[:35] = row  # Assuming decoder features are first 35
-        full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
-        decoder_scaled.append(full_row_scaled[:35])  # take back only 35 features
-    decoder_input = np.expand_dims(np.array(decoder_scaled), axis=0).astype(np.float32)
+    all_feature_names = feature_scaler.feature_names_in_
+    output_length = 32
+
+    # --- Fetch forecast data from AEMO ---
+    response = requests.post(
+        "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
+        json={"timeScale": ["30MIN"]},
+    )
+    response.raise_for_status()
+    forecasts_raw = response.json()
+
+    if "5MIN" not in forecasts_raw:
+        raise ValueError("Missing '5MIN' key in AEMO response")
+
+    forecasts = forecasts_raw["5MIN"][:output_length]
+    forecasts = [{f"F_{k}": v for k, v in row.items()} for row in forecasts]
+
+    df = pd.DataFrame(forecasts)
+    df = df.reindex(columns=all_feature_names, fill_value=0.0)
+
+    scaled = feature_scaler.transform(df.values)
+
+    decoder_input = np.expand_dims(scaled[:, :35], axis=0).astype(np.float32)
     return decoder_input
 
 
