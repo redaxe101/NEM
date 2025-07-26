@@ -30,12 +30,9 @@ model = tf.keras.models.load_model(model_path)
 def build_encoder_input_from_aemo():
     # Fetch latest NEM/AEMO data
     # Preprocess into shape (1, 48, 14)
-    # Return as np.float32
 
-    # === Dummy encoder input: (1, 48, 14) ===
     encoder_input_raw = np.random.rand(1, 48, 14)
 
-    # Scale each 14-feature row by embedding into a 49-feature dummy row
     encoder_scaled = []
     num_features = feature_scaler.n_features_in_
     for row in encoder_input_raw[0]:
@@ -52,7 +49,6 @@ def build_decoder_input_from_aemo():
     all_feature_names = feature_scaler.feature_names_in_
     output_length = 32
 
-    # --- Fetch forecast data from AEMO ---
     response = requests.post(
         "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
         json={"timeScale": ["30MIN"]},
@@ -70,6 +66,7 @@ def build_decoder_input_from_aemo():
     df["F_SETTLEMENTDATE"] = pd.to_datetime(df["F_SETTLEMENTDATE"])
     df = df.set_index("F_SETTLEMENTDATE")
     df.index = df.index.tz_localize("Australia/Brisbane")
+    # Filter for NSW1
     df = df[df["F_REGION"] == "NSW1"]
     df = df.resample("30min", label="right", closed="right").mean(numeric_only=True)[
         :output_length
@@ -102,7 +99,6 @@ def fetch_and_predict_loop():
             )  # shape: (1, 32, 1)
             preds_scaled = preds_scaled.reshape(-1)
 
-            # === Unscale predictions ===
             num_features = feature_scaler.n_features_in_
             rrp_index = all_feature_cols.index("RRP")
             X_dummy = np.zeros((32, num_features))
