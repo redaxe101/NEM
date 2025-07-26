@@ -14,6 +14,7 @@ warnings.filterwarnings("ignore", message=".*does not have valid feature names.*
 
 latest_prediction = None
 latest_timestamp = None
+timestamps = None
 
 feature_scaler = joblib.load(
     os.path.join(os.path.dirname(__file__), "feature_scaler.pkl")
@@ -62,20 +63,27 @@ def build_decoder_input_from_aemo():
     if "5MIN" not in forecasts_raw:
         raise ValueError("Missing '5MIN' key in AEMO response")
 
-    forecasts = forecasts_raw["5MIN"][:output_length]
+    forecasts = forecasts_raw["5MIN"]
     forecasts = [{f"F_{k}": v for k, v in row.items()} for row in forecasts]
 
     df = pd.DataFrame(forecasts)
+    df["F_SETTLEMENTDATE"] = pd.to_datetime(df["F_SETTLEMENTDATE"])
+    df = df.set_index("F_SETTLEMENTDATE")
+    df.index = df.index.tz_localize("Australia/Brisbane")
+    df = df.resample("30min", label="right", closed="right").mean(numeric_only=True)[
+        :output_length
+    ]
+    df_index = df.index
     df = df.reindex(columns=all_feature_names, fill_value=0.0)
 
     scaled = feature_scaler.transform(df.values)
 
     decoder_input = np.expand_dims(scaled[:, :35], axis=0).astype(np.float32)
-    return decoder_input
+    return decoder_input, df_index
 
 
 def fetch_and_predict_loop():
-    global latest_prediction, latest_timestamp
+    global latest_prediction, latest_timestamp, timestamps
 
     while True:
         try:
@@ -83,7 +91,9 @@ def fetch_and_predict_loop():
 
             # === Replace this with real AEMO fetching and input generation ===
             encoder_input = build_encoder_input_from_aemo()  # shape: (1, 48, 14)
-            decoder_input = build_decoder_input_from_aemo()  # shape: (1, 32, 35)
+            decoder_input, timestamps = (
+                build_decoder_input_from_aemo()
+            )  # shape: (1, 32, 35)
 
             preds_scaled = model.predict(
                 [encoder_input, decoder_input]
@@ -108,7 +118,7 @@ def fetch_and_predict_loop():
         except Exception as e:
             print("❌ Error in prediction loop:", e)
 
-        time.sleep(1800)
+        time.sleep(300)
 
 
 @app.route("/")
@@ -128,7 +138,8 @@ def predict():
 
     return jsonify(
         {
-            "timestamp": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamps": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
+            "pred_timestamp": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
             "predictions": latest_prediction,
         }
     )
