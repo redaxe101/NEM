@@ -125,7 +125,10 @@ def fetch_and_predict_loop():
 
 @app.route("/")
 def index():
-    return "NEM spot price predictor by Mark Sinclair, 2025. <a href='predict'>NSW1</a>"
+    return (
+        "NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>NSW1</a>",
+        200,
+    )
 
 
 @app.route("/healthz")
