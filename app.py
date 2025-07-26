@@ -70,9 +70,11 @@ def build_decoder_input_from_aemo():
     df["F_SETTLEMENTDATE"] = pd.to_datetime(df["F_SETTLEMENTDATE"])
     df = df.set_index("F_SETTLEMENTDATE")
     df.index = df.index.tz_localize("Australia/Brisbane")
+    df = df[df["F_REGION"] == "NSW1"]
     df = df.resample("30min", label="right", closed="right").mean(numeric_only=True)[
         :output_length
     ]
+
     df_index = df.index
     df = df.reindex(columns=all_feature_names, fill_value=0.0)
 
@@ -138,8 +140,8 @@ def predict():
 
     return jsonify(
         {
-            "timestamps": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
-            "pred_timestamp": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "nem_timestamps": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
+            "prediction_time": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
             "predictions": latest_prediction,
         }
     )
