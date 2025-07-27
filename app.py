@@ -139,9 +139,11 @@ def predict():
 
     return jsonify(
         {
-            "nemTimestamps": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
+            "nemTimestamp": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
             "predictionTime": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "predictions": latest_prediction,
+            "spotPrice": latest_prediction,
+            "spikeProbability": [],
+            "totalDemand": [],
         }
     )
 
