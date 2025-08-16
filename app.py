@@ -112,7 +112,7 @@ model = tf.keras.models.load_model(model_path)
 
 
 def build_encoder_input_from_aemo():
-    # Fetch latest NEM/AEMO data
+    # Fetch latest NEM/AEMO data yo
     # Preprocess into shape (1, 48, 14)
 
     encoder_input_raw = np.random.rand(1, input_length, 14)
