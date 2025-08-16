@@ -147,15 +147,23 @@ def build_decoder_input_from_aemo():
     df = df.set_index("F_SETTLEMENTDATE")
     df.index = df.index.tz_localize("Australia/Brisbane")
     # Filter for NSW1
-    df = df[df["F_REGION"] == "NSW1"]
-    df = df.resample("30min", label="right", closed="right").mean(numeric_only=True)[
-        :output_length
-    ]
+    enc_df = df[df["F_REGION"] == region]
+    enc_df = enc_df.resample("30min", label="right", closed="right").mean(
+        numeric_only=True
+    )[:output_length]
+    df_index = enc_df.index
 
-    df_index = df.index
-    df = df.reindex(columns=decoder_feature_cols, fill_value=0.0)
+    for sample_region in ("NSW1", "VIC1", "QLD1"):
+        new_df = df[df["F_REGION"] == sample_region]
+        new_df = new_df.resample("30min", label="right", closed="right").mean(
+            numeric_only=True
+        )[:output_length]
+        new_df = new_df.add_suffix("_" + sample_region)
+        enc_df = enc_df.join(new_df)
 
-    scaled = dec_scaler.transform(df.values)
+    enc_df = enc_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
+
+    scaled = dec_scaler.transform(enc_df.values)
 
     decoder_input = np.expand_dims(
         scaled[:, : len(decoder_feature_cols)], axis=0
