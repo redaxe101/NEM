@@ -14,18 +14,100 @@ import warnings
 
 warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
 
-latest_prediction = None
-latest_timestamp = None
-timestamps = None
+decoder_feature_cols = [
+    "F_TOTALDEMAND",
+    "F_RRP",
+    "F_AVAILABLEGENERATION",
+    "F_RESERVE_MARGIN",
+    "F_RENEWABLES_SHARE",
+    "F_IMPORT_RATIO",
+    "F_TOTALDEMAND_NSW1",
+    "F_RRP_NSW1",
+    "F_TOTALDEMAND_VIC1",
+    "F_RRP_VIC1",
+    "F_TOTALDEMAND_QLD1",
+    "F_RRP_QLD1",
+    "F_AVAILABLEGENERATION_VIC1",
+    "F_RESERVE_MARGIN_VIC1",
+    "F_RENEWABLES_SHARE_VIC1",
+    "F_IMPORT_RATIO_VIC1",
+    "F_AVAILABLEGENERATION_QLD1",
+    "F_RESERVE_MARGIN_QLD1",
+    "F_RENEWABLES_SHARE_QLD1",
+    "F_IMPORT_RATIO_QLD1",
+    "F_half_hour_sin",
+    "F_half_hour_cos",
+    "F_dow_sin",
+    "F_dow_cos",
+    "F_month_sin",
+    "F_month_cos",
+    "F_temperature_2m",
+    "F_cloudcover",
+    "F_relative_humidity_2m",
+    "F_windspeed_10m",
+    "F_TEMPHUMIDITY",
+    "F_TEMP_ABOVE_28",
+    "F_TEMP_BELOW_16",
+    "F_workday",
+]
+encoder_feature_cols = [
+    "RRP",
+    "TOTALDEMAND",
+    "RRP_NSW1",
+    "TOTALDEMAND_NSW1",
+    "RRP_VIC1",
+    "TOTALDEMAND_VIC1",
+    "RRP_QLD1",
+    "TOTALDEMAND_QLD1",
+    "half_hour_sin",
+    "half_hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "month_sin",
+    "month_cos",
+    "temperature_2m",
+    "cloudcover",
+    "relative_humidity_2m",
+    "windspeed_10m",
+    "TEMPHUMIDITY",
+    "TEMP_ABOVE_28",
+    "TEMP_BELOW_16",
+    "rrp_rolling_std_1h",
+    "rrp_max_past_1h",
+    "workday",
+]
 
-feature_scaler = joblib.load(
-    os.path.join(os.path.dirname(__file__), "feature_scaler.pkl")
+latest_rrp = None
+latest_spike_prob = None
+latest_dem = None
+latest_timestamp = None
+
+timestamps = None
+region = "NSW1"
+input_length = 4
+output_length = 32
+
+dec_scaler = joblib.load(
+    os.path.join(os.path.dirname(__file__), f"{region}_dec_scaler.joblib")
 )
-all_feature_cols = feature_scaler.feature_names_in_.tolist()
+
+enc_scaler = joblib.load(
+    os.path.join(os.path.dirname(__file__), f"{region}_enc_scaler.joblib")
+)
+
+rrp_scaler = joblib.load(
+    os.path.join(os.path.dirname(__file__), f"{region}_rrp_scaler.joblib")
+)
+
+dem_scaler = joblib.load(
+    os.path.join(os.path.dirname(__file__), f"{region}_dem_scaler.joblib")
+)
 
 app = Flask(__name__)
 # Load model at startup instead of using before_first_request
-model_path = os.path.join(os.path.dirname(__file__), "transformer_model.keras")
+model_path = os.path.join(
+    os.path.dirname(__file__), f"transformer_model_med_{region}.keras"
+)
 model = tf.keras.models.load_model(model_path)
 
 
@@ -33,23 +115,19 @@ def build_encoder_input_from_aemo():
     # Fetch latest NEM/AEMO data
     # Preprocess into shape (1, 48, 14)
 
-    encoder_input_raw = np.random.rand(1, 48, 14)
+    encoder_input_raw = np.random.rand(1, input_length, 14)
 
     encoder_scaled = []
-    num_features = feature_scaler.n_features_in_
+    num_features = len(encoder_feature_cols)
     for row in encoder_input_raw[0]:
         full_row = np.zeros((num_features,))
-        full_row[:14] = row  # Assuming encoder features are first 14
-        full_row_scaled = feature_scaler.transform(full_row.reshape(1, -1))[0]
-        encoder_scaled.append(full_row_scaled[:14])  # take back only 14 features
+        full_row_scaled = enc_scaler.transform(full_row.reshape(1, -1))[0]
+        encoder_scaled.append(full_row_scaled)
     encoder_input = np.expand_dims(np.array(encoder_scaled), axis=0).astype(np.float32)
     return encoder_input
 
 
 def build_decoder_input_from_aemo():
-
-    all_feature_names = feature_scaler.feature_names_in_
-    output_length = 32
 
     response = requests.post(
         "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
@@ -75,16 +153,18 @@ def build_decoder_input_from_aemo():
     ]
 
     df_index = df.index
-    df = df.reindex(columns=all_feature_names, fill_value=0.0)
+    df = df.reindex(columns=decoder_feature_cols, fill_value=0.0)
 
-    scaled = feature_scaler.transform(df.values)
+    scaled = dec_scaler.transform(df.values)
 
-    decoder_input = np.expand_dims(scaled[:, :35], axis=0).astype(np.float32)
+    decoder_input = np.expand_dims(
+        scaled[:, : len(decoder_feature_cols)], axis=0
+    ).astype(np.float32)
     return decoder_input, df_index
 
 
 def fetch_and_predict_loop():
-    global latest_prediction, latest_timestamp, timestamps
+    global latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
 
     while True:
         try:
@@ -96,21 +176,17 @@ def fetch_and_predict_loop():
                 build_decoder_input_from_aemo()
             )  # shape: (1, 32, 35)
 
-            preds_scaled = model.predict(
-                [encoder_input, decoder_input]
-            )  # shape: (1, 32, 1)
-            preds_scaled = preds_scaled.reshape(-1)
+            preds_scaled = model.predict([encoder_input, decoder_input])
+            # preds_scaled = preds_scaled.reshape(-1)
 
-            num_features = feature_scaler.n_features_in_
-            rrp_index = all_feature_cols.index("RRP")
-            X_dummy = np.zeros((32, num_features))
-            X_dummy[:, rrp_index] = preds_scaled
-            preds_unscaled = feature_scaler.inverse_transform(X_dummy)[
-                :, rrp_index
-            ].tolist()
+            latest_rrp = rrp_scaler.inverse_transform(
+                preds_scaled[0].reshape(-1, 1)
+            ).tolist()
+            latest_spike_prob = preds_scaled[1].reshape(-1, 1).tolist()
+            latest_dem = dem_scaler.inverse_transform(
+                preds_scaled[2].reshape(-1, 1)
+            ).tolist()
 
-            # Save result
-            latest_prediction = preds_unscaled
             latest_timestamp = datetime.now()
 
             print("✅ Prediction updated at", latest_timestamp)
@@ -118,10 +194,10 @@ def fetch_and_predict_loop():
         except Exception as e:
             print("❌ Error in prediction loop:", e)
 
-        time.sleep(300)
+        time.sleep(((15 - (time.time() % 60)) % 60) or 60)
 
 
-def last_saved_model_date(model_path: str, tz="Australia/Sydney") -> str:
+def last_saved_model_date(model_path: str, tz="UTC") -> str:
     dt = datetime.fromtimestamp(Path(model_path).stat().st_mtime, ZoneInfo(tz))
     return f"{dt.day} {dt:%B %Y}"
 
@@ -130,7 +206,7 @@ def last_saved_model_date(model_path: str, tz="Australia/Sydney") -> str:
 def index():
     model_path = f"transformer_model.keras"
     return (
-        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>NSW1</a> Model trained: {last_saved_model_date(model_path)}",
+        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>{region}</a> Model trained: {last_saved_model_date(model_path)}",
         200,
     )
 
@@ -142,16 +218,16 @@ def healthz():
 
 @app.route("/predict", methods=["GET"])
 def predict():
-    if latest_prediction is None:
+    if latest_rrp is None:
         return jsonify({"error": "Prediction not ready yet"}), 503
 
     return jsonify(
         {
             "nemTimestamp": [ts.isoformat() for ts in timestamps],
             "predictionTime": latest_timestamp.isoformat(),
-            "spotPrice": latest_prediction,
-            "spikeProbability": [],
-            "totalDemand": [],
+            "spotPrice": latest_rrp,
+            "spikeProbability": latest_spike_prob,
+            "totalDemand": latest_dem,
         }
     )
 
