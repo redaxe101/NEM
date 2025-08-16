@@ -106,7 +106,7 @@ dem_scaler = joblib.load(
 app = Flask(__name__)
 # Load model at startup instead of using before_first_request
 model_path = os.path.join(
-    os.path.dirname(__file__), f"transformer_model_med_{region}.keras"
+    os.path.dirname(__file__), f"transformer_model_small_{region}.keras"
 )
 model = tf.keras.models.load_model(model_path)
 
