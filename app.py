@@ -3,6 +3,8 @@ import tensorflow as tf
 import numpy as np
 import os
 import joblib
+from pathlib import Path
+from zoneinfo import ZoneInfo
 import threading
 import time
 import pandas as pd
@@ -119,10 +121,16 @@ def fetch_and_predict_loop():
         time.sleep(300)
 
 
+def last_saved_model_date(model_path: str, tz="Australia/Sydney") -> str:
+    dt = datetime.fromtimestamp(Path(model_path).stat().st_mtime, ZoneInfo(tz))
+    return f"{dt.day} {dt:%B %Y}"
+
+
 @app.route("/")
 def index():
+    model_path = f"transformer_model.keras"
     return (
-        "NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>NSW1</a>",
+        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>NSW1</a> Model trained: {last_saved_model_date(model_path)}",
         200,
     )
 
@@ -139,8 +147,8 @@ def predict():
 
     return jsonify(
         {
-            "nemTimestamp": timestamps.strftime("%Y-%m-%d %H:%M:%S").tolist(),
-            "predictionTime": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "nemTimestamp": [ts.isoformat() for ts in timestamps],
+            "predictionTime": latest_timestamp.isoformat(),
             "spotPrice": latest_prediction,
             "spikeProbability": [],
             "totalDemand": [],
