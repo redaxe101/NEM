@@ -5,6 +5,7 @@ import os
 import joblib
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from flask import render_template_string
 import threading
 import time
 import pandas as pd
@@ -190,10 +191,10 @@ def fetch_and_predict_loop():
             latest_rrp = rrp_scaler.inverse_transform(
                 preds_scaled[0].reshape(-1, 1)
             ).tolist()
-            latest_spike_prob = preds_scaled[1].reshape(-1, 1).tolist()
             latest_dem = dem_scaler.inverse_transform(
-                preds_scaled[2].reshape(-1, 1)
+                preds_scaled[1].reshape(-1, 1)
             ).tolist()
+            latest_spike_prob = preds_scaled[2].reshape(-1, 1).tolist()
 
             latest_timestamp = datetime.now()
 
@@ -214,7 +215,7 @@ def last_saved_model_date(model_path: str, tz="UTC") -> str:
 def index():
     model_path = f"transformer_model.keras"
     return (
-        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025. <a href='predict'>{region}</a> Model trained: {last_saved_model_date(model_path)}",
+        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025.<br/><br/><a href='predict'>{region}</a> <a href='/chart'>view chart</a> Model trained: {last_saved_model_date(model_path)}",
         200,
     )
 
@@ -222,6 +223,167 @@ def index():
 @app.route("/healthz")
 def healthz():
     return "ok", 200
+
+
+@app.get("/chart")
+def chart():
+    return render_template_string(
+        """
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>NEM Prediction</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <!-- Chart.js + Luxon time adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin:0; padding:2rem; font-family:system-ui, sans-serif; background:#0f0f0f; color:#ddd; }
+      #wrap { max-width: 1100px; margin: 0 auto; }
+      /* Responsive canvas: give it a fixed height while letting width be responsive */
+      .chart-wrap { position: relative; height: 420px; }
+      canvas { background:#1b1b1b; border-radius:12px; }
+      small { color:#aaa; }
+      #err { color:#f66; white-space:pre-wrap; margin-top:.75rem; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <h2 id="title">NEM prediction</h2>
+      <small id="stamp"></small>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+      <div id="err"></div>
+    </div>
+
+    <script>
+    (async () => {
+      const el   = document.getElementById("chart");
+      const h2   = document.getElementById("title");
+      const err  = document.getElementById("err");
+      const stamp= document.getElementById("stamp");
+
+      // ISO -> epoch ms via Luxon (robust across zones)
+      const parseTime = iso => {
+        const dt = luxon.DateTime.fromISO(iso);
+        return dt.isValid ? dt.toMillis() : NaN;
+      };
+      const toXY = (ts, ys) => {
+        const n = Math.min(ts.length, ys.length);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const x = parseTime(ts[i]);
+          const y = Number(ys[i]);
+          if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+        }
+        return out;
+      };
+
+      async function load() {
+        const r = await fetch("/predict", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+
+        const region = j.region || "Unknown";
+        document.title = `NEM Prediction — ${region}`;
+        h2.textContent = `NEM prediction (${region})`;
+        stamp.textContent = "Prediction time: " + (j.predictionTime || "");
+
+        return {
+          price:  toXY(j.nemTimestamp ?? [], j.spotPrice ?? []),
+          spike:  toXY(j.nemTimestamp ?? [], j.spikeProbability ?? []), // already 0..1
+          demand: toXY(j.nemTimestamp ?? [], j.totalDemand ?? []),
+        };
+      }
+
+      try {
+        const d = await load();
+
+        const chart = new Chart(el, {
+          type: "line",
+          data: {
+            datasets: [
+              { label: "Spot Price (A$/MWh)", data: d.price,  yAxisID: "y1",
+                borderColor: "#4ade80", borderWidth: 2, pointRadius: 0, tension: 0.2, spanGaps: true },
+              { label: "Spike Prob.",         data: d.spike,  yAxisID: "y2",
+                borderColor: "#60a5fa", borderDash: [6,4], pointRadius: 0, tension: 0.2, spanGaps: true },
+              { label: "Demand (MW)",         data: d.demand, yAxisID: "y3",
+                hidden: true,
+                borderColor: "#f59e0b", pointRadius: 0, tension: 0.2, spanGaps: true }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,  // use CSS height
+            parsing: false,              // we supply {x,y}
+            animation: false,
+            interaction: { mode: "nearest", intersect: false },
+            scales: {
+              x: {
+                type: "time",
+                time: {
+                  unit: "hour",
+                  displayFormats: { minute: "HH:mm", hour: "HH:mm" },
+                  tooltipFormat: "ccc HH:mm"     // Mon 13:30
+                }
+              },
+              y1: { position: "left",
+                    title: { display: true, text: "A$/MWh" } },
+              y2: { position: "right", min: 0, max: 1,
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: "Spike prob." } },
+              y3: { position: "right", display: false,
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: "MW" } }
+            },
+            plugins: {
+              legend: { position: "bottom" },
+              tooltip: {
+                callbacks: {
+                  label: (c) => {
+                    const y = c.parsed.y;
+                    if (c.dataset.yAxisID === "y2") return ` ${y.toFixed(3)} prob`;
+                    if (c.dataset.yAxisID === "y3") return ` ${Math.round(y).toLocaleString()} MW`;
+                    return ` $${y.toFixed(2)} / MWh`;
+                  }
+                }
+              }
+            },
+            adapters: { date: { zone: "Australia/Sydney" } }
+          }
+        });
+
+        // Refresh every minute (match your background cadence)
+        setInterval(async () => {
+          try {
+            const d2 = await load();
+            chart.data.datasets[0].data = d2.price;
+            chart.data.datasets[1].data = d2.spike;
+            chart.data.datasets[2].data = d2.demand;
+            chart.update("none");
+          } catch (e) {
+            console.error("Refresh failed:", e);
+          }
+        }, 60_000);
+
+      } catch (e) {
+        console.error(e);
+        err.textContent = "Error: " + (e?.message || e);
+      }
+    })();
+    </script>
+  </body>
+</html>
+"""
+    )
+
+
+def _flat(xs):
+    return [float(v[0]) if isinstance(v, (list, tuple)) else float(v) for v in xs]
 
 
 @app.route("/predict", methods=["GET"])
@@ -233,9 +395,10 @@ def predict():
         {
             "nemTimestamp": [ts.isoformat() for ts in timestamps],
             "predictionTime": latest_timestamp.isoformat(),
-            "spotPrice": latest_rrp,
-            "spikeProbability": latest_spike_prob,
-            "totalDemand": latest_dem,
+            "spotPrice": _flat(latest_rrp),
+            "spikeProbability": _flat(latest_spike_prob),
+            "totalDemand": _flat(latest_dem),
+            "region": region,
         }
     )
 
