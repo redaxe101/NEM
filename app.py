@@ -112,47 +112,52 @@ model_path = os.path.join(
 model = tf.keras.models.load_model(model_path)
 
 
-def build_encoder_input_from_aemo():
-    # Fetch latest NEM/AEMO data yo
-    # Preprocess into shape (1, 48, 14)
+def build_encoder_input_from_aemo(forecasts):
+    df = pd.DataFrame(forecasts)
+    df["SETTLEMENTDATE"] = pd.to_datetime(df["SETTLEMENTDATE"])
+    df = df.set_index("SETTLEMENTDATE")
+    df = df[df["PERIODTYPE"] == "ACTUAL"]
+    df.index = df.index.tz_localize("Australia/Brisbane")
+    # Filter for NSW1
 
-    encoder_input_raw = np.random.rand(1, input_length, 14)
+    enc_df = df[df["REGION"] == region]
+    enc_df = enc_df.resample("30min", label="right", closed="right").mean(
+        numeric_only=True
+    )[-input_length:]
 
-    encoder_scaled = []
-    num_features = len(encoder_feature_cols)
-    for row in encoder_input_raw[0]:
-        full_row = np.zeros((num_features,))
-        full_row_scaled = enc_scaler.transform(full_row.reshape(1, -1))[0]
-        encoder_scaled.append(full_row_scaled)
-    encoder_input = np.expand_dims(np.array(encoder_scaled), axis=0).astype(np.float32)
+    for sample_region in ("NSW1", "VIC1", "QLD1"):
+        new_df = df[df["REGION"] == sample_region]
+        new_df = new_df.resample("30min", label="right", closed="right").mean(
+            numeric_only=True
+        )[-input_length:]
+        new_df = new_df.add_suffix("_" + sample_region)
+        enc_df = enc_df.join(new_df)
+
+    enc_df = enc_df.reindex(columns=encoder_feature_cols, fill_value=0.0)
+    scaled = enc_scaler.transform(enc_df.values)
+
+    encoder_input = np.expand_dims(
+        scaled[:, : len(encoder_feature_cols)], axis=0
+    ).astype(np.float32)
+
     return encoder_input
 
 
-def build_decoder_input_from_aemo():
+def build_decoder_input_from_aemo(forecasts):
 
-    response = requests.post(
-        "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
-        json={"timeScale": ["30MIN"]},
-    )
-    response.raise_for_status()
-    forecasts_raw = response.json()
+    dec_forecasts = [{f"F_{k}": v for k, v in row.items()} for row in forecasts]
 
-    if "5MIN" not in forecasts_raw:
-        raise ValueError("Missing '5MIN' key in AEMO response")
-
-    forecasts = forecasts_raw["5MIN"]
-    forecasts = [{f"F_{k}": v for k, v in row.items()} for row in forecasts]
-
-    df = pd.DataFrame(forecasts)
+    df = pd.DataFrame(dec_forecasts)
     df["F_SETTLEMENTDATE"] = pd.to_datetime(df["F_SETTLEMENTDATE"])
     df = df.set_index("F_SETTLEMENTDATE")
+    df = df[df["F_PERIODTYPE"] == "FORECAST"]
     df.index = df.index.tz_localize("Australia/Brisbane")
     # Filter for NSW1
-    enc_df = df[df["F_REGION"] == region]
-    enc_df = enc_df.resample("30min", label="right", closed="right").mean(
+    dec_df = df[df["F_REGION"] == region]
+    dec_df = dec_df.resample("30min", label="right", closed="right").mean(
         numeric_only=True
     )[:output_length]
-    df_index = enc_df.index
+    df_index = dec_df.index
 
     for sample_region in ("NSW1", "VIC1", "QLD1"):
         new_df = df[df["F_REGION"] == sample_region]
@@ -160,11 +165,10 @@ def build_decoder_input_from_aemo():
             numeric_only=True
         )[:output_length]
         new_df = new_df.add_suffix("_" + sample_region)
-        enc_df = enc_df.join(new_df)
+        dec_df = dec_df.join(new_df)
 
-    enc_df = enc_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
-
-    scaled = dec_scaler.transform(enc_df.values)
+    dec_df = dec_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
+    scaled = dec_scaler.transform(dec_df.values)
 
     decoder_input = np.expand_dims(
         scaled[:, : len(decoder_feature_cols)], axis=0
@@ -179,10 +183,25 @@ def fetch_and_predict_loop():
         try:
             print("🔁 Fetching AEMO data and running prediction...")
 
+            response = requests.post(
+                "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
+                json={"timeScale": ["30MIN"]},
+                timeout=10,
+            )
+            response.raise_for_status()
+            forecasts_raw = response.json()
+
+            if "5MIN" not in forecasts_raw:
+                raise ValueError("Missing '5MIN' key in AEMO response")
+
+            forecasts = forecasts_raw["5MIN"]
+
             # === Replace this with real AEMO fetching and input generation ===
-            encoder_input = build_encoder_input_from_aemo()  # shape: (1, 48, 14)
-            decoder_input, timestamps = (
-                build_decoder_input_from_aemo()
+            encoder_input = build_encoder_input_from_aemo(
+                forecasts
+            )  # shape: (1, 48, 14)
+            decoder_input, timestamps = build_decoder_input_from_aemo(
+                forecasts
             )  # shape: (1, 32, 35)
 
             preds_scaled = model.predict([encoder_input, decoder_input])
@@ -353,7 +372,7 @@ def chart():
                 }
               }
             },
-            adapters: { date: { zone: "Australia/Sydney" } }
+            adapters: { date: { zone: "utc" } }
           }
         });
 
