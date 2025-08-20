@@ -487,7 +487,7 @@ def chart():
                   tooltipFormat: "ccc HH:mm"     // Mon 13:30
                 }
               },
-              y1: { position: "left", 
+              y1: { position: "left", suggestedMin: 0, suggestedMax: 350,
                     title: { display: true, text: "A$/MWh" } },
               y2: { position: "right", min: 0, max: 1,
                     grid: { drawOnChartArea: false },
