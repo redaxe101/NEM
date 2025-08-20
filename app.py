@@ -10,32 +10,35 @@ import threading
 import time
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import warnings
 
 warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
+pd.set_option("display.max_columns", None)
+pd.set_option("display.width", 0)  # Automatically fit the display
+pd.set_option("display.expand_frame_repr", False)
 
 decoder_feature_cols = [
     "F_TOTALDEMAND",
     "F_RRP",
-    "F_AVAILABLEGENERATION",
-    "F_RESERVE_MARGIN",
-    "F_RENEWABLES_SHARE",
-    "F_IMPORT_RATIO",
+    # "F_AVAILABLEGENERATION",
+    # "F_RESERVE_MARGIN",
+    # "F_RENEWABLES_SHARE",
+    # "F_IMPORT_RATIO",
     "F_TOTALDEMAND_NSW1",
     "F_RRP_NSW1",
     "F_TOTALDEMAND_VIC1",
     "F_RRP_VIC1",
     "F_TOTALDEMAND_QLD1",
     "F_RRP_QLD1",
-    "F_AVAILABLEGENERATION_VIC1",
-    "F_RESERVE_MARGIN_VIC1",
-    "F_RENEWABLES_SHARE_VIC1",
-    "F_IMPORT_RATIO_VIC1",
-    "F_AVAILABLEGENERATION_QLD1",
-    "F_RESERVE_MARGIN_QLD1",
-    "F_RENEWABLES_SHARE_QLD1",
-    "F_IMPORT_RATIO_QLD1",
+    # "F_AVAILABLEGENERATION_VIC1",
+    # "F_RESERVE_MARGIN_VIC1",
+    # "F_RENEWABLES_SHARE_VIC1",
+    # "F_IMPORT_RATIO_VIC1",
+    # "F_AVAILABLEGENERATION_QLD1",
+    # "F_RESERVE_MARGIN_QLD1",
+    # "F_RENEWABLES_SHARE_QLD1",
+    # "F_IMPORT_RATIO_QLD1",
     "F_half_hour_sin",
     "F_half_hour_cos",
     "F_dow_sin",
@@ -83,6 +86,7 @@ latest_spike_prob = None
 latest_dem = None
 latest_timestamp = None
 
+
 timestamps = None
 region = "NSW1"
 input_length = 4
@@ -91,15 +95,12 @@ output_length = 32
 dec_scaler = joblib.load(
     os.path.join(os.path.dirname(__file__), f"{region}_dec_scaler.joblib")
 )
-
 enc_scaler = joblib.load(
     os.path.join(os.path.dirname(__file__), f"{region}_enc_scaler.joblib")
 )
-
 rrp_scaler = joblib.load(
     os.path.join(os.path.dirname(__file__), f"{region}_rrp_scaler.joblib")
 )
-
 dem_scaler = joblib.load(
     os.path.join(os.path.dirname(__file__), f"{region}_dem_scaler.joblib")
 )
@@ -109,12 +110,77 @@ app = Flask(__name__)
 model_path = os.path.join(
     os.path.dirname(__file__), f"transformer_model_small_{region}.keras"
 )
-model = tf.keras.models.load_model(model_path)
+model = tf.keras.models.load_model(model_path, compile=False)
+model.compile(optimizer="adam", loss="mse")
 
 
-def build_encoder_input_from_aemo(forecasts):
+def add_time_features(df, region):
+    """
+    Adds sine and cosine time-based features to a DataFrame with a DatetimeIndex or MultiIndex,
+    using 30-minute intervals that are adjusted for daylight savings.
+
+    Features:
+        - half_hour_sin, half_hour_cos (48 values/day, DST-adjusted)
+        - dow_sin, dow_cos (day of week)
+        - month_sin, month_cos (month of year)
+    """
+    import pandas as pd
+    import numpy as np
+
+    if region == "QLD1":
+        timezone = "Australia/Brisbane"
+    else:
+        timezone = "Australia/Sydney"
+
+    if not isinstance(df.index, (pd.DatetimeIndex, pd.MultiIndex)):
+        raise ValueError("df must have a DatetimeIndex or MultiIndex")
+
+    # Extract datetime index (convert to local time with DST handling)
+    if isinstance(df.index, pd.MultiIndex):
+        datetime_index = df.index.get_level_values("DATETIME")
+    else:
+        datetime_index = df.index
+
+    # Ensure timezone-aware index
+    if datetime_index.tz is None:
+        datetime_index = datetime_index.tz_localize("UTC").tz_convert(timezone)
+    else:
+        datetime_index = datetime_index.tz_convert(timezone)
+
+    # Half hour slot
+    half_hour_slot = datetime_index.hour * 2 + (datetime_index.minute // 30)
+    df["half_hour_sin"] = np.sin(2 * np.pi * half_hour_slot / 48)
+    df["half_hour_cos"] = np.cos(2 * np.pi * half_hour_slot / 48)
+
+    # Day of week
+    df["dow_sin"] = np.sin(2 * np.pi * datetime_index.dayofweek / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * datetime_index.dayofweek / 7)
+    df["workday"] = (datetime_index.dayofweek <= 4).astype(int)
+
+    # Month of year
+    df["month_sin"] = np.sin(2 * np.pi * datetime_index.month / 12)
+    df["month_cos"] = np.cos(2 * np.pi * datetime_index.month / 12)
+
+    return df
+
+
+def add_other_features(df):
+    # df["AVAILABLEGENERATION"] = (
+    #     df["SCHEDULEDGENERATION"]
+    #     + df["SEMISCHEDULEDGENERATION"]
+    # )
+    # df["RESERVE_MARGIN"] = df["AVAILABLEGENERATION"] - df["TOTALDEMAND"]
+    # df["RENEWABLES_SHARE"] = df["SEMISCHEDULEDGENERATION"] / (df["AVAILABLEGENERATION"])
+    # df["IMPORT_RATIO"] = df["NETINTERCHANGE"] / df["TOTALDEMAND"]
+    return df
+
+
+def build_encoder_input_from_aemo(forecasts, weather_df):
+
     df = pd.DataFrame(forecasts)
-    df["SETTLEMENTDATE"] = pd.to_datetime(df["SETTLEMENTDATE"])
+    df["SETTLEMENTDATE"] = pd.to_datetime(
+        df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
+    )
     df = df.set_index("SETTLEMENTDATE")
     df = df[df["PERIODTYPE"] == "ACTUAL"]
     df.index = df.index.tz_localize("Australia/Brisbane")
@@ -123,18 +189,24 @@ def build_encoder_input_from_aemo(forecasts):
     enc_df = df[df["REGION"] == region]
     enc_df = enc_df.resample("30min", label="right", closed="right").mean(
         numeric_only=True
-    )[-input_length:]
+    )
 
     for sample_region in ("NSW1", "VIC1", "QLD1"):
         new_df = df[df["REGION"] == sample_region]
         new_df = new_df.resample("30min", label="right", closed="right").mean(
             numeric_only=True
-        )[-input_length:]
+        )
         new_df = new_df.add_suffix("_" + sample_region)
         enc_df = enc_df.join(new_df)
 
+    enc_df["rrp_rolling_std_1h"] = enc_df["RRP"].rolling(2).std().fillna(0)
+    enc_df["rrp_max_past_1h"] = enc_df["RRP"].rolling(2).max().fillna(0)
+
+    enc_df = add_time_features(enc_df, region)
+    enc_df = enc_df.join(weather_df, how="left")
     enc_df = enc_df.reindex(columns=encoder_feature_cols, fill_value=0.0)
-    scaled = enc_scaler.transform(enc_df.values)
+    enc_df = enc_df[-input_length - 1 : -1]
+    scaled = enc_scaler.transform(np.array(enc_df, dtype=np.float32))
 
     encoder_input = np.expand_dims(
         scaled[:, : len(encoder_feature_cols)], axis=0
@@ -143,32 +215,42 @@ def build_encoder_input_from_aemo(forecasts):
     return encoder_input
 
 
-def build_decoder_input_from_aemo(forecasts):
+def build_decoder_input_from_aemo(forecasts, weather_df):
 
-    dec_forecasts = [{f"F_{k}": v for k, v in row.items()} for row in forecasts]
+    df = pd.DataFrame(forecasts)
+    df["SETTLEMENTDATE"] = pd.to_datetime(
+        df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
+    )
+    df = df.set_index("SETTLEMENTDATE")
 
-    df = pd.DataFrame(dec_forecasts)
-    df["F_SETTLEMENTDATE"] = pd.to_datetime(df["F_SETTLEMENTDATE"])
-    df = df.set_index("F_SETTLEMENTDATE")
-    df = df[df["F_PERIODTYPE"] == "FORECAST"]
+    # TODO: current_price - inject
+
+    df = df[df["PERIODTYPE"] == "FORECAST"]
     df.index = df.index.tz_localize("Australia/Brisbane")
     # Filter for NSW1
-    dec_df = df[df["F_REGION"] == region]
+    dec_df = df[df["REGION"] == region]
     dec_df = dec_df.resample("30min", label="right", closed="right").mean(
         numeric_only=True
-    )[:output_length]
+    )
     df_index = dec_df.index
+    dec_df = add_other_features(dec_df)
 
     for sample_region in ("NSW1", "VIC1", "QLD1"):
-        new_df = df[df["F_REGION"] == sample_region]
+        new_df = df[df["REGION"] == sample_region]
         new_df = new_df.resample("30min", label="right", closed="right").mean(
             numeric_only=True
-        )[:output_length]
+        )
+        new_df = add_other_features(new_df)
         new_df = new_df.add_suffix("_" + sample_region)
         dec_df = dec_df.join(new_df)
 
+    dec_df = add_time_features(dec_df, region)
+    dec_df = dec_df.join(weather_df, how="left")
+
+    dec_df = dec_df.add_prefix("F_")
     dec_df = dec_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
-    scaled = dec_scaler.transform(dec_df.values)
+    dec_df = dec_df[:output_length]
+    scaled = dec_scaler.transform(np.array(dec_df, dtype=np.float32))
 
     decoder_input = np.expand_dims(
         scaled[:, : len(decoder_feature_cols)], axis=0
@@ -176,11 +258,70 @@ def build_decoder_input_from_aemo(forecasts):
     return decoder_input, df_index
 
 
+def fetch_actual_weather(region):
+    """
+    Fetch actual weather data from Open-Meteo API
+    """
+    # start_dt = pd.to_datetime(start_date).floor("D")
+    # end_dt = pd.to_datetime(end_date).ceil("D")
+
+    # # Fetch the missing full days from Open-Meteo (to avoid partial gaps)
+    # fetch_start = start_dt
+    # fetch_end = end_dt
+
+    print(f"🌤 Fetching weather ...")
+
+    match region:
+        case "NSW1":
+            lat = -33.8148
+            lon = 151.0017
+        case "QLD1":
+            lat = -27.4705
+            lon = 153.0251
+        case "VIC1":
+            lat = -37.8136
+            lon = 144.9631
+        case "TAS1":
+            lat = -42.8829
+            lon = 147.3272
+        case "SA1":
+            lat = -34.9285
+            lon = 138.5999
+
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        # "start_date": fetch_start,
+        # "end_date": fetch_end,
+        "hourly": "temperature_2m,cloudcover,relative_humidity_2m,windspeed_10m",
+        "timezone": "Australia/Brisbane",
+    }
+    r = requests.get(url, params=params)
+    data = r.json()["hourly"]
+    new_df = pd.DataFrame(data)
+    new_df["time"] = pd.to_datetime(new_df["time"])
+    new_df.set_index("time", inplace=True)
+    new_df = new_df.resample("30min").interpolate("linear").ffill().bfill()
+    new_df["TEMPHUMIDITY"] = new_df["temperature_2m"] * new_df["relative_humidity_2m"]
+    new_df["TEMP_ABOVE_28"] = (new_df["temperature_2m"] - 28).clip(lower=0)
+    new_df["TEMP_BELOW_16"] = (16 - new_df["temperature_2m"]).clip(lower=0)
+    new_df.index = new_df.index.tz_localize("Australia/Brisbane")
+
+    return new_df
+
+
 def fetch_and_predict_loop():
     global latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
-
+    last_weather = None
     while True:
         try:
+            if not last_weather or datetime.now(
+                tz=ZoneInfo("UTC")
+            ) - last_weather > timedelta(minutes=15):
+                weather_df = fetch_actual_weather(region)
+                last_weather = datetime.now(tz=ZoneInfo("UTC"))
+
             print("🔁 Fetching AEMO data and running prediction...")
 
             response = requests.post(
@@ -196,17 +337,13 @@ def fetch_and_predict_loop():
 
             forecasts = forecasts_raw["5MIN"]
 
-            # === Replace this with real AEMO fetching and input generation ===
-            encoder_input = build_encoder_input_from_aemo(
-                forecasts
-            )  # shape: (1, 48, 14)
             decoder_input, timestamps = build_decoder_input_from_aemo(
-                forecasts
-            )  # shape: (1, 32, 35)
+                forecasts, weather_df
+            )
+            encoder_input = build_encoder_input_from_aemo(forecasts, weather_df)
 
             preds_scaled = model.predict([encoder_input, decoder_input])
-            # preds_scaled = preds_scaled.reshape(-1)
-
+            # print([p.shape for p in preds_scaled])
             latest_rrp = rrp_scaler.inverse_transform(
                 preds_scaled[0].reshape(-1, 1)
             ).tolist()
@@ -215,7 +352,7 @@ def fetch_and_predict_loop():
             ).tolist()
             latest_spike_prob = preds_scaled[2].reshape(-1, 1).tolist()
 
-            latest_timestamp = datetime.now()
+            latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
 
             print("✅ Prediction updated at", latest_timestamp)
 
@@ -350,7 +487,7 @@ def chart():
                   tooltipFormat: "ccc HH:mm"     // Mon 13:30
                 }
               },
-              y1: { position: "left",
+              y1: { position: "left", 
                     title: { display: true, text: "A$/MWh" } },
               y2: { position: "right", min: 0, max: 1,
                     grid: { drawOnChartArea: false },
