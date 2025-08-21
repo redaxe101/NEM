@@ -19,26 +19,12 @@ pd.set_option("display.width", 0)  # Automatically fit the display
 pd.set_option("display.expand_frame_repr", False)
 
 decoder_feature_cols = [
-    "F_TOTALDEMAND",
-    "F_RRP",
-    # "F_AVAILABLEGENERATION",
-    # "F_RESERVE_MARGIN",
-    # "F_RENEWABLES_SHARE",
-    # "F_IMPORT_RATIO",
     "F_TOTALDEMAND_NSW1",
     "F_RRP_NSW1",
     "F_TOTALDEMAND_VIC1",
     "F_RRP_VIC1",
     "F_TOTALDEMAND_QLD1",
     "F_RRP_QLD1",
-    # "F_AVAILABLEGENERATION_VIC1",
-    # "F_RESERVE_MARGIN_VIC1",
-    # "F_RENEWABLES_SHARE_VIC1",
-    # "F_IMPORT_RATIO_VIC1",
-    # "F_AVAILABLEGENERATION_QLD1",
-    # "F_RESERVE_MARGIN_QLD1",
-    # "F_RENEWABLES_SHARE_QLD1",
-    # "F_IMPORT_RATIO_QLD1",
     "F_half_hour_sin",
     "F_half_hour_cos",
     "F_dow_sin",
@@ -55,8 +41,6 @@ decoder_feature_cols = [
     "F_workday",
 ]
 encoder_feature_cols = [
-    "RRP",
-    "TOTALDEMAND",
     "RRP_NSW1",
     "TOTALDEMAND_NSW1",
     "RRP_VIC1",
