@@ -69,6 +69,8 @@ latest_rrp = None
 latest_spike_prob = None
 latest_dem = None
 latest_timestamp = None
+previous_rrp = None
+previous_timestamp = None
 
 
 timestamps = None
@@ -160,6 +162,7 @@ def add_other_features(df):
 
 
 def build_encoder_input_from_aemo(forecasts, weather_df):
+    global previous_rrp, previous_timestamp
 
     df = pd.DataFrame(forecasts)
     df["SETTLEMENTDATE"] = pd.to_datetime(
@@ -190,6 +193,9 @@ def build_encoder_input_from_aemo(forecasts, weather_df):
     enc_df = enc_df.join(weather_df, how="left")
     enc_df = enc_df.reindex(columns=encoder_feature_cols, fill_value=0.0)
     enc_df = enc_df[-input_length - 1 : -1]
+
+    previous_rrp = enc_df[f"RRP_{region}"].values.tolist()
+    previous_timestamp = enc_df.index.tolist()
     scaled = enc_scaler.transform(np.array(enc_df, dtype=np.float32))
 
     encoder_input = np.expand_dims(
@@ -435,9 +441,11 @@ def chart():
 
         return {
           price:  toXY(j.nemTimestamp ?? [], j.spotPrice ?? []),
-          spike:  toXY(j.nemTimestamp ?? [], j.spikeProbability ?? []), // already 0..1
+          spike:  toXY(j.nemTimestamp ?? [], j.spikeProbability ?? []), 
           demand: toXY(j.nemTimestamp ?? [], j.totalDemand ?? []),
-        };
+          prev:   toXY((j.previousTimestamp ?? j.nemTimestamp) ?? [],
+                 (j.previousRrp ?? j.previous_rrp ?? [])),
+              };
       }
 
       try {
@@ -447,6 +455,8 @@ def chart():
           type: "line",
           data: {
             datasets: [
+              { label: "Prev RRP (history)", data: d.prev,   yAxisID: "y1",
+                    borderColor: "#a855f7", borderDash: [4,3], pointRadius: 0, tension: 0, spanGaps: true },
               { label: "Spot Price (A$/MWh)", data: d.price,  yAxisID: "y1",
                 borderColor: "#4ade80", borderWidth: 2, pointRadius: 0, tension: 0.2, spanGaps: true },
               { label: "Spike Prob.",         data: d.spike,  yAxisID: "y2",
@@ -501,9 +511,10 @@ def chart():
         setInterval(async () => {
           try {
             const d2 = await load();
-            chart.data.datasets[0].data = d2.price;
-            chart.data.datasets[1].data = d2.spike;
-            chart.data.datasets[2].data = d2.demand;
+            chart.data.datasets[0].data = d2.prev; 
+            chart.data.datasets[1].data = d2.price;
+            chart.data.datasets[2].data = d2.spike;
+            chart.data.datasets[3].data = d2.demand;
             chart.update("none");
           } catch (e) {
             console.error("Refresh failed:", e);
@@ -539,6 +550,8 @@ def predict():
             "spikeProbability": _flat(latest_spike_prob),
             "totalDemand": _flat(latest_dem),
             "region": region,
+            "previousRrp": previous_rrp,
+            "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
         }
     )
 
