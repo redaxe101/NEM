@@ -19,50 +19,55 @@ pd.set_option("display.width", 0)  # Automatically fit the display
 pd.set_option("display.expand_frame_repr", False)
 
 decoder_feature_cols = [
-    "F_TOTALDEMAND_NSW1",
     "F_RRP_NSW1",
-    "F_TOTALDEMAND_VIC1",
     "F_RRP_VIC1",
-    "F_TOTALDEMAND_QLD1",
     "F_RRP_QLD1",
+    "F_RRP_SA1",
+    "F_RRP_TAS1",
+    "F_TOTALDEMAND_NSW1",
+    "F_TOTALDEMAND_VIC1",
+    "F_TOTALDEMAND_QLD1",
+    "F_TOTALDEMAND_SA1",
+    "F_TOTALDEMAND_TAS1",
+    "F_rrp_min_past_NSW1",
+    "F_rrp_min_past_VIC1",
+    "F_rrp_min_past_QLD1",
+    "F_rrp_zscore_NSW1",
+    "F_rrp_zscore_QLD1",
+    "F_rrp_zscore_VIC1",
+    "F_rrp_zscore_TAS1",
+    "F_rrp_zscore_SA1",
     "F_half_hour_sin",
     "F_half_hour_cos",
-    "F_dow_sin",
-    "F_dow_cos",
-    "F_month_sin",
-    "F_month_cos",
-    "F_temperature_2m",
-    "F_cloudcover",
-    "F_relative_humidity_2m",
-    "F_windspeed_10m",
+    "F_hours_to_delivery",
     "F_TEMPHUMIDITY",
-    "F_TEMP_ABOVE_28",
-    "F_TEMP_BELOW_16",
-    "F_workday",
+    "F_TEMP_ABOVE",
+    "F_TEMP_BELOW",
+    "F_rrp_to_demand_NSW1",
+    "F_rrp_to_demand_QLD1",
+    "F_rrp_to_demand_VIC1",
 ]
 encoder_feature_cols = [
     "RRP_NSW1",
-    "TOTALDEMAND_NSW1",
     "RRP_VIC1",
-    "TOTALDEMAND_VIC1",
     "RRP_QLD1",
-    "TOTALDEMAND_QLD1",
-    "half_hour_sin",
-    "half_hour_cos",
-    "dow_sin",
-    "dow_cos",
-    "month_sin",
-    "month_cos",
-    "temperature_2m",
-    "cloudcover",
-    "relative_humidity_2m",
-    "windspeed_10m",
+    "RRP_TAS1",
+    "RRP_SA1",
     "TEMPHUMIDITY",
-    "TEMP_ABOVE_28",
-    "TEMP_BELOW_16",
-    "rrp_rolling_std_1h",
-    "rrp_max_past_1h",
-    "workday",
+    "TEMP_ABOVE",
+    "TEMP_BELOW",
+    "rrp_to_demand_NSW1",
+    "rrp_to_demand_VIC1",
+    "rrp_to_demand_QLD1",
+    "rrp_max_past_NSW1",
+    "rrp_max_past_VIC1",
+    "rrp_max_past_QLD1",
+    "rrp_skew_NSW1",
+    "rrp_skew_QLD1",
+    "rrp_skew_VIC1",
+    "rrp_kurt_NSW1",
+    "rrp_kurt_QLD1",
+    "rrp_kurt_VIC1",
 ]
 
 latest_rrp = None
@@ -75,29 +80,37 @@ previous_timestamp = None
 
 timestamps = None
 region = "NSW1"
-input_length = 4
+input_length = 8
 output_length = 32
 
 dec_scaler = joblib.load(
-    os.path.join(os.path.dirname(__file__), f"{region}_dec_scaler.joblib")
+    os.path.join(
+        os.path.dirname(__file__), f"dec_scaler_i{input_length}_{region}.joblib"
+    )
 )
 enc_scaler = joblib.load(
-    os.path.join(os.path.dirname(__file__), f"{region}_enc_scaler.joblib")
+    os.path.join(
+        os.path.dirname(__file__), f"enc_scaler_i{input_length}_{region}.joblib"
+    )
 )
 rrp_scaler = joblib.load(
-    os.path.join(os.path.dirname(__file__), f"{region}_rrp_scaler.joblib")
+    os.path.join(
+        os.path.dirname(__file__), f"rrp_scaler_i{input_length}_{region}.joblib"
+    )
 )
 dem_scaler = joblib.load(
-    os.path.join(os.path.dirname(__file__), f"{region}_dem_scaler.joblib")
+    os.path.join(
+        os.path.dirname(__file__), f"dem_scaler_i{input_length}_{region}.joblib"
+    )
 )
 
 app = Flask(__name__)
 # Load model at startup instead of using before_first_request
 model_path = os.path.join(
-    os.path.dirname(__file__), f"transformer_model_small_{region}.keras"
+    os.path.dirname(__file__), f"transformer_model_i{input_length}_small_{region}.keras"
 )
-model = tf.keras.models.load_model(model_path, compile=False)
-model.compile(optimizer="adam", loss="mse")
+model = tf.keras.models.load_model(model_path, compile=True)
+# model.compile(optimizer="AdamW", loss="mse")
 
 
 def add_time_features(df, region):
@@ -113,6 +126,8 @@ def add_time_features(df, region):
     import pandas as pd
     import numpy as np
 
+    df = df.copy()
+
     if region == "QLD1":
         timezone = "Australia/Brisbane"
     else:
@@ -126,6 +141,9 @@ def add_time_features(df, region):
         datetime_index = df.index.get_level_values("DATETIME")
     else:
         datetime_index = df.index
+
+    # subtract 30 minutes to align with beginning of half-hour period
+    datetime_index = pd.to_datetime(datetime_index) - pd.Timedelta(minutes=30)
 
     # Ensure timezone-aware index
     if datetime_index.tz is None:
@@ -151,6 +169,40 @@ def add_time_features(df, region):
 
 
 def add_other_features(df):
+    df = df.copy()
+    df["rrp_yesterday"] = df["RRP"].shift(48)
+    df["rrp_rolling_std"] = df["RRP"].rolling(4).std().fillna(0)
+    df["rrp_max_past"] = df["RRP"].rolling(4).max().fillna(0)
+    df["rrp_max_past_day"] = df["RRP"].rolling(48).max().fillna(0)
+    df["rrp_pct_change"] = (
+        df["RRP"].pct_change(fill_method=None).fillna(0).clip(lower=-1000, upper=1000)
+    )
+    df["rrp_abs_change"] = df["RRP"].diff().abs().fillna(0)
+    df["rrp_min_past"] = df["RRP"].rolling(4).min().fillna(0)
+    df["rrp_range"] = df["rrp_max_past"] - df["rrp_min_past"]
+    df["rrp_rolling_quantile_90"] = df["RRP"].rolling(96).quantile(0.9).fillna(0)
+    df["rrp_above_q90"] = (df["RRP"] > df["rrp_rolling_quantile_90"]).astype(int)
+    df["demand_rolling_quantile_90"] = (
+        df["TOTALDEMAND"].rolling(96).quantile(0.9).fillna(0)
+    )
+    df["demand_above_q90"] = (
+        df["TOTALDEMAND"] > df["demand_rolling_quantile_90"]
+    ).astype(int)
+    df["rrp_skew"] = df["RRP"].rolling(24).skew().fillna(0)
+    df["rrp_kurt"] = df["RRP"].rolling(24).kurt().fillna(0)
+    df["rrp_ma_12"] = df["RRP"].rolling(12).mean().fillna(0)
+    df["rrp_dev_ma12"] = (df["RRP"] - df["rrp_ma_12"]) / (
+        df["rrp_ma_12"].abs() + 1e-6
+    ).clip(lower=0, upper=10)
+    window = 24
+    df["rrp_mean_24"] = df["RRP"].rolling(window).mean()
+    df["rrp_std_24"] = df["RRP"].rolling(window).std()
+    df["rrp_zscore"] = (df["RRP"] - df["rrp_mean_24"]) / (df["rrp_std_24"] + 1e-6).clip(
+        lower=-10, upper=10
+    )
+    df["rrp_to_demand"] = (df["RRP"] / (df["TOTALDEMAND"] + 1e-6)).clip(
+        lower=0, upper=1
+    )
     # df["AVAILABLEGENERATION"] = (
     #     df["SCHEDULEDGENERATION"]
     #     + df["SEMISCHEDULEDGENERATION"]
@@ -161,42 +213,19 @@ def add_other_features(df):
     return df
 
 
-def build_encoder_input_from_aemo(forecasts, weather_df):
+def build_encoder_input_from_aemo(df, weather_df):
     global previous_rrp, previous_timestamp
 
-    df = pd.DataFrame(forecasts)
-    df["SETTLEMENTDATE"] = pd.to_datetime(
-        df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
-    )
-    df = df.set_index("SETTLEMENTDATE")
-    df = df[df["PERIODTYPE"] == "ACTUAL"]
-    df.index = df.index.tz_localize("Australia/Brisbane")
-    # Filter for NSW1
-
-    enc_df = df[df["REGION"] == region]
-    enc_df = enc_df.resample("30min", label="right", closed="right").mean(
-        numeric_only=True
-    )
-
-    for sample_region in ("NSW1", "VIC1", "QLD1"):
-        new_df = df[df["REGION"] == sample_region]
-        new_df = new_df.resample("30min", label="right", closed="right").mean(
-            numeric_only=True
-        )
-        new_df = new_df.add_suffix("_" + sample_region)
-        enc_df = enc_df.join(new_df)
-
-    enc_df["rrp_rolling_std_1h"] = enc_df["RRP"].rolling(2).std().fillna(0)
-    enc_df["rrp_max_past_1h"] = enc_df["RRP"].rolling(2).max().fillna(0)
+    enc_df = df[df["PERIODTYPE"] == "ACTUAL"]
 
     enc_df = add_time_features(enc_df, region)
     enc_df = enc_df.join(weather_df, how="left")
     enc_df = enc_df.reindex(columns=encoder_feature_cols, fill_value=0.0)
-    enc_df = enc_df[-input_length - 1 : -1]
+    enc_df = enc_df[-input_length:]
 
-    previous_rrp = enc_df[f"RRP_{region}"].values.tolist()
-    previous_timestamp = enc_df.index.tolist()
-    scaled = enc_scaler.transform(np.array(enc_df, dtype=np.float32))
+    previous_rrp = enc_df[f"RRP_{region}"].values.tolist()[-12:]
+    previous_timestamp = enc_df.index.tolist()[-12:]
+    scaled = enc_scaler.transform(np.array(enc_df.fillna(0), dtype=np.float32))
 
     encoder_input = np.expand_dims(
         scaled[:, : len(encoder_feature_cols)], axis=0
@@ -205,42 +234,20 @@ def build_encoder_input_from_aemo(forecasts, weather_df):
     return encoder_input
 
 
-def build_decoder_input_from_aemo(forecasts, weather_df):
-
-    df = pd.DataFrame(forecasts)
-    df["SETTLEMENTDATE"] = pd.to_datetime(
-        df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
-    )
-    df = df.set_index("SETTLEMENTDATE")
-
-    # TODO: current_price - inject
-
-    df = df[df["PERIODTYPE"] == "FORECAST"]
-    df.index = df.index.tz_localize("Australia/Brisbane")
-    # Filter for NSW1
-    dec_df = df[df["REGION"] == region]
-    dec_df = dec_df.resample("30min", label="right", closed="right").mean(
-        numeric_only=True
-    )
-    df_index = dec_df.index
-    dec_df = add_other_features(dec_df)
-
-    for sample_region in ("NSW1", "VIC1", "QLD1"):
-        new_df = df[df["REGION"] == sample_region]
-        new_df = new_df.resample("30min", label="right", closed="right").mean(
-            numeric_only=True
-        )
-        new_df = add_other_features(new_df)
-        new_df = new_df.add_suffix("_" + sample_region)
-        dec_df = dec_df.join(new_df)
+def build_decoder_input_from_aemo(df, weather_df):
+    dec_df = df[df["PERIODTYPE"] == "FORECAST"]
 
     dec_df = add_time_features(dec_df, region)
+    df_index = dec_df.index
     dec_df = dec_df.join(weather_df, how="left")
+    dec_df["hours_to_delivery"] = (
+        dec_df.index - dec_df.index[0]
+    ).total_seconds() / 3600
 
     dec_df = dec_df.add_prefix("F_")
     dec_df = dec_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
     dec_df = dec_df[:output_length]
-    scaled = dec_scaler.transform(np.array(dec_df, dtype=np.float32))
+    scaled = dec_scaler.transform(np.array(dec_df.fillna(0), dtype=np.float32))
 
     decoder_input = np.expand_dims(
         scaled[:, : len(decoder_feature_cols)], axis=0
@@ -252,13 +259,6 @@ def fetch_actual_weather(region):
     """
     Fetch actual weather data from Open-Meteo API
     """
-    # start_dt = pd.to_datetime(start_date).floor("D")
-    # end_dt = pd.to_datetime(end_date).ceil("D")
-
-    # # Fetch the missing full days from Open-Meteo (to avoid partial gaps)
-    # fetch_start = start_dt
-    # fetch_end = end_dt
-
     print(f"🌤 Fetching weather ...")
 
     match region:
@@ -282,8 +282,6 @@ def fetch_actual_weather(region):
     params = {
         "latitude": lat,
         "longitude": lon,
-        # "start_date": fetch_start,
-        # "end_date": fetch_end,
         "hourly": "temperature_2m,cloudcover,relative_humidity_2m,windspeed_10m",
         "timezone": "Australia/Brisbane",
     }
@@ -294,8 +292,8 @@ def fetch_actual_weather(region):
     new_df.set_index("time", inplace=True)
     new_df = new_df.resample("30min").interpolate("linear").ffill().bfill()
     new_df["TEMPHUMIDITY"] = new_df["temperature_2m"] * new_df["relative_humidity_2m"]
-    new_df["TEMP_ABOVE_28"] = (new_df["temperature_2m"] - 28).clip(lower=0)
-    new_df["TEMP_BELOW_16"] = (16 - new_df["temperature_2m"]).clip(lower=0)
+    new_df["TEMP_ABOVE"] = (new_df["temperature_2m"] - 27).clip(lower=0)
+    new_df["TEMP_BELOW"] = (16 - new_df["temperature_2m"]).clip(lower=0)
     new_df.index = new_df.index.tz_localize("Australia/Brisbane")
 
     return new_df
@@ -312,7 +310,7 @@ def fetch_and_predict_loop():
                 weather_df = fetch_actual_weather(region)
                 last_weather = datetime.now(tz=ZoneInfo("UTC"))
 
-            print("🔁 Fetching AEMO data and running prediction...")
+            print("🔁 Fetching AEMO data and running predictions...")
 
             response = requests.post(
                 "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
@@ -326,14 +324,39 @@ def fetch_and_predict_loop():
                 raise ValueError("Missing '5MIN' key in AEMO response")
 
             forecasts = forecasts_raw["5MIN"]
+            df = pd.DataFrame(forecasts)
+            df["SETTLEMENTDATE"] = pd.to_datetime(
+                df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
+            )
+            df = df.set_index("SETTLEMENTDATE")
+            df.index = df.index.tz_localize("Australia/Brisbane")
+            # first_row = df.iloc[[0]].copy()
+            # first_row.index = first_row.index - pd.Timedelta(minutes=30)
+            # df = pd.concat([first_row, df]).sort_index()
+
+            main_df = df[df["REGION"] == region]
+            main_df = main_df.resample("30min", label="right", closed="right").agg(
+                {
+                    **{col: "mean" for col in df.select_dtypes("number").columns},
+                    **{
+                        col: "last"
+                        for col in df.select_dtypes(exclude="number").columns
+                    },
+                }
+            )
+            for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
+                new_df = df[df["REGION"] == sample_region]
+                new_df = add_other_features(new_df)
+                new_df = new_df.add_suffix("_" + sample_region)
+                main_df = main_df.join(new_df)
 
             decoder_input, timestamps = build_decoder_input_from_aemo(
-                forecasts, weather_df
+                main_df, weather_df
             )
-            encoder_input = build_encoder_input_from_aemo(forecasts, weather_df)
+            encoder_input = build_encoder_input_from_aemo(main_df, weather_df)
 
             preds_scaled = model.predict([encoder_input, decoder_input])
-            # print([p.shape for p in preds_scaled])
+
             latest_rrp = rrp_scaler.inverse_transform(
                 preds_scaled[0].reshape(-1, 1)
             ).tolist()
@@ -359,7 +382,7 @@ def last_saved_model_date(model_path: str, tz="UTC") -> str:
 
 @app.route("/")
 def index():
-    model_path = f"transformer_model.keras"
+    model_path = f"transformer_model_i{input_length}_small_{region}.keras"
     return (
         f"NEM spot price predictor by Mark Sinclair, University of New England, 2025.<br/><br/><a href='predict'>{region}</a> <a href='/chart'>view chart</a> Model trained: {last_saved_model_date(model_path)}",
         200,
