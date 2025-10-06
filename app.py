@@ -417,8 +417,14 @@ def index():
     </head>
     <body>
         <h2>NEM Spot Price Predictor</h2>
-        <p>Developed by <strong>Mark Sinclair</strong><br>
-        University of New England, 2025</p>
+        <div style="display: flex; align-items: center; max-width: 500px;">
+        <img src="/static/une_logo.png" alt="UNE Logo"
+            style="width: 60px; height: auto; margin-right: 10px;">
+        <div style="line-height: 1.4;">
+            Developed by <b>Mark Sinclair</b>,<br>
+            University of New England, 2025
+        </div>
+        </div>
 
         <p>
             {region} <a href="/predict">API</a> |
@@ -428,7 +434,7 @@ def index():
         <p><em>Model trained:</em> {last_saved_model_date(model_path)}</p>
 
 <footer>
-  © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+  © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
   <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
   Forecasts and model outputs are licensed under 
   <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
@@ -484,7 +490,7 @@ def chart():
       </div>
       <div id="err"></div>
 <footer>
-  © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+  © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
   <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
   Forecasts and model outputs are licensed under 
   <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
