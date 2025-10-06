@@ -15,7 +15,7 @@ import warnings
 
 warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
 pd.set_option("display.max_columns", None)
-pd.set_option("display.width", 0)  # Automatically fit the display
+pd.set_option("display.width", 0)
 pd.set_option("display.expand_frame_repr", False)
 
 decoder_feature_cols = [
@@ -408,15 +408,15 @@ def index():
 
         <p><em>Model trained:</em> {last_saved_model_date(model_path)}</p>
 
-        <footer>
-            © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
-            <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
-            Data © Australian Energy Market Operator (AEMO), licensed under 
-            <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>. 
-  Forecasting models and visualisations are original academic research outputs. 
-  Cite as: Sinclair, M. (2025). <i>nem.redaxe.com: Transformer-Based Forecasting of Electricity Prices in the Australian NEM.</i> UNE. 
-  <a href="https://nem.redaxe.com" target="_blank">https://nem.redaxe.com</a>
-        </footer>
+<footer>
+  © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+  <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
+  Forecasts and model outputs are licensed under 
+  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
+  free for use and redistribution, including commercial use, with attribution. 
+  Based on data © Australian Energy Market Operator (AEMO), licensed under 
+  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+</footer>
     </body>
     </html>
     """
@@ -451,6 +451,9 @@ def chart():
       canvas { background:#1b1b1b; border-radius:12px; }
       small { color:#aaa; }
       #err { color:#f66; white-space:pre-wrap; margin-top:.75rem; }
+        footer { margin-top: 2em; font-size: 0.85em; color: #777; border-top: 1px solid #ccc; padding-top: 1em; }
+        a { color: #0066cc; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
@@ -461,15 +464,15 @@ def chart():
         <canvas id="chart"></canvas>
       </div>
       <div id="err"></div>
-    <p style="font-size:0.85em; color:#888; line-height:1.4em;">
-    © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
-    <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia.
-    Data © Australian Energy Market Operator (AEMO), licensed under 
-    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
-    Forecasting models and visualisations are original academic research outputs.
-    Cite as: Sinclair, M. (2025). <i>nem.redaxe.com: Transformer-Based Forecasting of Electricity Prices in the Australian NEM.</i> UNE. 
-    <a href="https://nem.redaxe.com" target="_blank">https://nem.redaxe.com</a>
-    </p>    
+<footer>
+  © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+  <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
+  Forecasts and model outputs are licensed under 
+  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
+  free for use and redistribution, including commercial use, with attribution. 
+  Based on data © Australian Energy Market Operator (AEMO), licensed under 
+  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+</footer>   
     </div>
 
     <script>
