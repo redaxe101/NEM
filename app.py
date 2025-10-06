@@ -106,10 +106,26 @@ dem_scaler = joblib.load(
 
 app = Flask(__name__)
 # Load model at startup instead of using before_first_request
-model_path = os.path.join(
-    os.path.dirname(__file__), f"transformer_model_i{input_length}_small_{region}.keras"
-)
-model = tf.keras.models.load_model(model_path, compile=True)
+
+model = None
+
+
+def get_model():
+    global model
+    model_path = os.path.join(
+        os.path.dirname(__file__),
+        f"transformer_model_i{input_length}_small_{region}.keras",
+    )
+    if model is None:
+        import tensorflow as tf
+
+        print("⏳ Loading model...")
+        model = tf.keras.models.load_model(model_path, compile=True)
+        print("✅ Model loaded successfully.")
+    return model
+
+
+# model = tf.keras.models.load_model(model_path, compile=True)
 # model.compile(optimizer="AdamW", loss="mse")
 
 
@@ -301,6 +317,9 @@ def fetch_actual_weather(region):
 
 def fetch_and_predict_loop():
     global latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
+    global model
+    model = get_model()
+
     last_weather = None
     while True:
         try:
