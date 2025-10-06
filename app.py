@@ -383,10 +383,44 @@ def last_saved_model_date(model_path: str, tz="UTC") -> str:
 @app.route("/")
 def index():
     model_path = f"transformer_model_i{input_length}_small_{region}.keras"
-    return (
-        f"NEM spot price predictor by Mark Sinclair, University of New England, 2025.<br/><br/><a href='predict'>{region}</a> <a href='/chart'>view chart</a> Model trained: {last_saved_model_date(model_path)}",
-        200,
-    )
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>NEM Forecast — {region}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 2em; line-height: 1.6; color: #333; }}
+            footer {{ margin-top: 2em; font-size: 0.85em; color: #777; border-top: 1px solid #ccc; padding-top: 1em; }}
+            a {{ color: #0066cc; text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+        </style>
+    </head>
+    <body>
+        <h2>NEM Spot Price Predictor</h2>
+        <p>Developed by <strong>Mark Sinclair</strong><br>
+        University of New England, 2025</p>
+
+        <p>
+            {region} <a href="/predict">API</a> |
+            <a href="/chart">Chart</a>
+        </p>
+
+        <p><em>Model trained:</em> {last_saved_model_date(model_path)}</p>
+
+        <footer>
+            © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+            <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
+            Data © Australian Energy Market Operator (AEMO), licensed under 
+            <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>. 
+  Forecasting models and visualisations are original academic research outputs. 
+  Cite as: Sinclair, M. (2025). <i>nem.redaxe.com: Transformer-Based Forecasting of Electricity Prices in the Australian NEM.</i> UNE. 
+  <a href="https://nem.redaxe.com" target="_blank">https://nem.redaxe.com</a>
+        </footer>
+    </body>
+    </html>
+    """
+    return html, 200, {"Content-Type": "text/html"}
 
 
 @app.route("/healthz")
@@ -421,12 +455,21 @@ def chart():
   </head>
   <body>
     <div id="wrap">
-      <h2 id="title">NEM prediction</h2>
+      <h2 id="title">NEM Prediction</h2>
       <small id="stamp"></small>
       <div class="chart-wrap">
         <canvas id="chart"></canvas>
       </div>
       <div id="err"></div>
+    <p style="font-size:0.85em; color:#888; line-height:1.4em;">
+    © 2025 Mark Sinclair. Developed as part of postgraduate research at the 
+    <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia.
+    Data © Australian Energy Market Operator (AEMO), licensed under 
+    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+    Forecasting models and visualisations are original academic research outputs.
+    Cite as: Sinclair, M. (2025). <i>nem.redaxe.com: Transformer-Based Forecasting of Electricity Prices in the Australian NEM.</i> UNE. 
+    <a href="https://nem.redaxe.com" target="_blank">https://nem.redaxe.com</a>
+    </p>    
     </div>
 
     <script>
@@ -456,11 +499,10 @@ def chart():
         const r = await fetch("/predict", { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const j = await r.json();
-
         const region = j.region || "Unknown";
         document.title = `NEM Prediction — ${region}`;
-        h2.textContent = `NEM prediction (${region})`;
-        stamp.textContent = "Prediction time: " + (j.predictionTime || "");
+        h2.textContent = `NEM Prediction (${region})`;
+        stamp.textContent = "Prediction time: " + (j.predictionTime || "").slice(0, 16);
 
         return {
           price:  toXY(j.nemTimestamp ?? [], j.spotPrice ?? []),
@@ -550,6 +592,7 @@ def chart():
       }
     })();
     </script>
+
   </body>
 </html>
 """
