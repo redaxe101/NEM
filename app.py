@@ -70,59 +70,69 @@ encoder_feature_cols = [
     "rrp_kurt_VIC1",
 ]
 
-latest_rrp = None
-latest_spike_prob = None
-latest_dem = None
+global_regions = ["NSW1", "VIC1", "QLD1"]
+
 latest_timestamp = None
-previous_rrp = None
 previous_timestamp = None
 
-
 timestamps = None
-region = "NSW1"
 input_length = 8
 output_length = 32
 
-dec_scaler = joblib.load(
-    os.path.join(
-        os.path.dirname(__file__), f"dec_scaler_i{input_length}_{region}.joblib"
+dec_scaler = {}
+enc_scaler = {}
+rrp_scaler = {}
+dem_scaler = {}
+model = {}
+latest_rrp = {}
+latest_spike_prob = {}
+latest_dem = {}
+previous_rrp = {}
+
+for region in global_regions:
+    dec_scaler[region] = joblib.load(
+        os.path.join(
+            os.path.dirname(__file__), f"dec_scaler_i{input_length}_{region}.joblib"
+        )
     )
-)
-enc_scaler = joblib.load(
-    os.path.join(
-        os.path.dirname(__file__), f"enc_scaler_i{input_length}_{region}.joblib"
+    enc_scaler[region] = joblib.load(
+        os.path.join(
+            os.path.dirname(__file__), f"enc_scaler_i{input_length}_{region}.joblib"
+        )
     )
-)
-rrp_scaler = joblib.load(
-    os.path.join(
-        os.path.dirname(__file__), f"rrp_scaler_i{input_length}_{region}.joblib"
+    rrp_scaler[region] = joblib.load(
+        os.path.join(
+            os.path.dirname(__file__), f"rrp_scaler_i{input_length}_{region}.joblib"
+        )
     )
-)
-dem_scaler = joblib.load(
-    os.path.join(
-        os.path.dirname(__file__), f"dem_scaler_i{input_length}_{region}.joblib"
+    dem_scaler[region] = joblib.load(
+        os.path.join(
+            os.path.dirname(__file__), f"dem_scaler_i{input_length}_{region}.joblib"
+        )
     )
-)
+    model[region] = None
+    latest_rrp[region] = None
+    latest_spike_prob[region] = None
+    latest_dem[region] = None
+    previous_rrp[region] = None
 
 app = Flask(__name__)
 # Load model at startup instead of using before_first_request
 
-model = None
 
-
-def get_model():
+def get_model(region):
     global model
     model_path = os.path.join(
         os.path.dirname(__file__),
         f"transformer_model_i{input_length}_small_{region}.keras",
     )
-    if model is None:
+    if model[region] is None:
         import tensorflow as tf
 
         print("⏳ Loading model...")
-        model = tf.keras.models.load_model(model_path, compile=True)
+        model[region] = tf.keras.models.load_model(model_path, compile=True)
         print("✅ Model loaded successfully.")
-    return model
+    return model[region]
 
 
 # model = tf.keras.models.load_model(model_path, compile=True)
@@ -229,7 +239,7 @@ def add_other_features(df):
     return df
 
 
-def build_encoder_input_from_aemo(df, weather_df):
+def build_encoder_input_from_aemo(df, weather_df, region):
     global previous_rrp, previous_timestamp
 
     enc_df = df[df["PERIODTYPE"] == "ACTUAL"]
@@ -239,9 +249,9 @@ def build_encoder_input_from_aemo(df, weather_df):
     enc_df = enc_df.reindex(columns=encoder_feature_cols, fill_value=0.0)
     enc_df = enc_df[-input_length:]
 
-    previous_rrp = enc_df[f"RRP_{region}"].values.tolist()[-12:]
+    previous_rrp[region] = enc_df[f"RRP_{region}"].values.tolist()[-12:]
     previous_timestamp = enc_df.index.tolist()[-12:]
-    scaled = enc_scaler.transform(np.array(enc_df.fillna(0), dtype=np.float32))
+    scaled = enc_scaler[region].transform(np.array(enc_df.fillna(0), dtype=np.float32))
 
     encoder_input = np.expand_dims(
         scaled[:, : len(encoder_feature_cols)], axis=0
@@ -250,7 +260,7 @@ def build_encoder_input_from_aemo(df, weather_df):
     return encoder_input
 
 
-def build_decoder_input_from_aemo(df, weather_df):
+def build_decoder_input_from_aemo(df, weather_df, region):
     dec_df = df[df["PERIODTYPE"] == "FORECAST"]
 
     dec_df = add_time_features(dec_df, region)
@@ -263,7 +273,7 @@ def build_decoder_input_from_aemo(df, weather_df):
     dec_df = dec_df.add_prefix("F_")
     dec_df = dec_df.reindex(columns=decoder_feature_cols, fill_value=0.0)
     dec_df = dec_df[:output_length]
-    scaled = dec_scaler.transform(np.array(dec_df.fillna(0), dtype=np.float32))
+    scaled = dec_scaler[region].transform(np.array(dec_df.fillna(0), dtype=np.float32))
 
     decoder_input = np.expand_dims(
         scaled[:, : len(decoder_feature_cols)], axis=0
@@ -318,16 +328,13 @@ def fetch_actual_weather(region):
 def fetch_and_predict_loop():
     global latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
     global model
-    model = get_model()
 
-    last_weather = None
+    last_weather = {}
+    for region in global_regions:
+        model[region] = get_model(region)
+        last_weather[region] = None
     while True:
         try:
-            if not last_weather or datetime.now(
-                tz=ZoneInfo("UTC")
-            ) - last_weather > timedelta(minutes=15):
-                weather_df = fetch_actual_weather(region)
-                last_weather = datetime.now(tz=ZoneInfo("UTC"))
 
             print("🔁 Fetching AEMO data and running predictions...")
 
@@ -352,37 +359,50 @@ def fetch_and_predict_loop():
             # first_row = df.iloc[[0]].copy()
             # first_row.index = first_row.index - pd.Timedelta(minutes=30)
             # df = pd.concat([first_row, df]).sort_index()
+            for region in global_regions:
 
-            main_df = df[df["REGION"] == region]
-            main_df = main_df.resample("30min", label="right", closed="right").agg(
-                {
-                    **{col: "mean" for col in df.select_dtypes("number").columns},
-                    **{
-                        col: "last"
-                        for col in df.select_dtypes(exclude="number").columns
-                    },
-                }
-            )
-            for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
-                new_df = df[df["REGION"] == sample_region]
-                new_df = add_other_features(new_df)
-                new_df = new_df.add_suffix("_" + sample_region)
-                main_df = main_df.join(new_df)
+                if not last_weather[region] or datetime.now(
+                    tz=ZoneInfo("UTC")
+                ) - last_weather[region] > timedelta(minutes=15):
+                    weather_df = fetch_actual_weather(region)
+                    last_weather[region] = datetime.now(tz=ZoneInfo("UTC"))
 
-            decoder_input, timestamps = build_decoder_input_from_aemo(
-                main_df, weather_df
-            )
-            encoder_input = build_encoder_input_from_aemo(main_df, weather_df)
+                main_df = df[df["REGION"] == region]
+                main_df = main_df.resample("30min", label="right", closed="right").agg(
+                    {
+                        **{col: "mean" for col in df.select_dtypes("number").columns},
+                        **{
+                            col: "last"
+                            for col in df.select_dtypes(exclude="number").columns
+                        },
+                    }
+                )
+                for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
+                    new_df = df[df["REGION"] == sample_region]
+                    new_df = add_other_features(new_df)
+                    new_df = new_df.add_suffix("_" + sample_region)
+                    main_df = main_df.join(new_df)
 
-            preds_scaled = model.predict([encoder_input, decoder_input])
+                decoder_input, timestamps = build_decoder_input_from_aemo(
+                    main_df, weather_df, region
+                )
+                encoder_input = build_encoder_input_from_aemo(
+                    main_df, weather_df, region
+                )
 
-            latest_rrp = rrp_scaler.inverse_transform(
-                preds_scaled[0].reshape(-1, 1)
-            ).tolist()
-            latest_dem = dem_scaler.inverse_transform(
-                preds_scaled[1].reshape(-1, 1)
-            ).tolist()
-            latest_spike_prob = preds_scaled[2].reshape(-1, 1).tolist()
+                preds_scaled = model[region].predict([encoder_input, decoder_input])
+
+                latest_rrp[region] = (
+                    rrp_scaler[region]
+                    .inverse_transform(preds_scaled[0].reshape(-1, 1))
+                    .tolist()
+                )
+                latest_dem[region] = (
+                    dem_scaler[region]
+                    .inverse_transform(preds_scaled[1].reshape(-1, 1))
+                    .tolist()
+                )
+                latest_spike_prob[region] = preds_scaled[2].reshape(-1, 1).tolist()
 
             latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
 
@@ -401,13 +421,12 @@ def last_saved_model_date(model_path: str, tz="UTC") -> str:
 
 @app.route("/")
 def index():
-    model_path = f"transformer_model_i{input_length}_small_{region}.keras"
     html = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>NEM Forecast — {region}</title>
+        <title>NEM Forecast</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 2em; line-height: 1.6; color: #333; }}
             footer {{ margin-top: 2em; font-size: 0.85em; color: #777; border-top: 1px solid #ccc; padding-top: 1em; }}
@@ -416,7 +435,7 @@ def index():
         </style>
     </head>
     <body>
-        <h2>NEM Spot Price Predictor</h2>
+        <h2>NEM Forecast - Deep Learning Transformer Models</h2>
         <div style="display: flex; align-items: center; max-width: 500px;">
         <img src="/static/une_logo.png" alt="UNE Logo"
             style="width: 60px; height: auto; margin-right: 10px;">
@@ -427,21 +446,24 @@ def index():
         </div>
 
         <p>
-            {region} <a href="/predict">API</a> |
-            <a href="/chart">Chart</a>
+            NSW1 <a href="/predict/NSW1">API</a> | <a href="/chart/NSW1">Chart</a>
+        </p>
+        <p>
+            VIC1 <a href="/predict/VIC1">API</a> | <a href="/chart/VIC1">Chart</a>
+        </p>
+        <p>
+            QLD1 <a href="/predict/QLD1">API</a> | <a href="/chart/QLD1">Chart</a>
         </p>
 
-        <p><em>Model trained:</em> {last_saved_model_date(model_path)}</p>
-
-<footer>
-  © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
-  <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
-  Forecasts and model outputs are licensed under 
-  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
-  free for use and redistribution, including commercial use, with attribution. 
-  Based on data © Australian Energy Market Operator (AEMO), licensed under 
-  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
-</footer>
+        <footer style="max-width: 600px;text-align: justify;">
+        © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
+        <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
+        Forecasts and model outputs are licensed under 
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
+        free for use and redistribution, including commercial use, with attribution. 
+        Based on data © Australian Energy Market Operator (AEMO) and © Open-Meteo Weather API, licensed under 
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+        </footer>
     </body>
     </html>
     """
@@ -453,15 +475,15 @@ def healthz():
     return "ok", 200
 
 
-@app.get("/chart")
-def chart():
+@app.route("/chart/<region>", methods=["GET"])
+def chart(region):
     return render_template_string(
         """
 <!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <title>NEM Prediction</title>
+    <title>NEM Forecasts</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <!-- Chart.js + Luxon time adapter -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -483,21 +505,22 @@ def chart():
   </head>
   <body>
     <div id="wrap">
-      <h2 id="title">NEM Prediction</h2>
-      <small id="stamp"></small>
-      <div class="chart-wrap">
-        <canvas id="chart"></canvas>
-      </div>
-      <div id="err"></div>
-<footer>
-  © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
-  <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
-  Forecasts and model outputs are licensed under 
-  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
-  free for use and redistribution, including commercial use, with attribution. 
-  Based on data © Australian Energy Market Operator (AEMO), licensed under 
-  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
-</footer>   
+        <h2 id="title">NEM Forecast</h2>
+        <small id="stamp"></small>
+        <div class="chart-wrap">
+            <canvas id="chart"></canvas>
+        </div>
+        <div id="err"></div>
+
+        <footer style="max-width: 600px;text-align: justify;">
+        © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
+        <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
+        Forecasts and model outputs are licensed under 
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
+        free for use and redistribution, including commercial use, with attribution. 
+        Based on data © Australian Energy Market Operator (AEMO) and © Open-Meteo Weather API, licensed under 
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+        </footer>   
     </div>
 
     <script>
@@ -524,7 +547,7 @@ def chart():
       };
 
       async function load() {
-        const r = await fetch("/predict", { cache: "no-store" });
+        const r = await fetch(`/predict/{{ region }}`, { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const j = await r.json();
         const region = j.region || "Unknown";
@@ -623,7 +646,8 @@ def chart():
 
   </body>
 </html>
-"""
+""",
+        region=region,
     )
 
 
@@ -631,20 +655,20 @@ def _flat(xs):
     return [float(v[0]) if isinstance(v, (list, tuple)) else float(v) for v in xs]
 
 
-@app.route("/predict", methods=["GET"])
-def predict():
-    if latest_rrp is None:
+@app.route("/predict/<region>", methods=["GET"])
+def predict(region):
+    if latest_rrp[region] is None:
         return jsonify({"error": "Prediction not ready yet"}), 503
 
     return jsonify(
         {
             "nemTimestamp": [ts.isoformat() for ts in timestamps],
             "predictionTime": latest_timestamp.isoformat(),
-            "spotPrice": _flat(latest_rrp),
-            "spikeProbability": _flat(latest_spike_prob),
-            "totalDemand": _flat(latest_dem),
+            "spotPrice": _flat(latest_rrp[region]),
+            "spikeProbability": _flat(latest_spike_prob[region]),
+            "totalDemand": _flat(latest_dem[region]),
             "region": region,
-            "previousRrp": previous_rrp,
+            "previousRrp": previous_rrp[region],
             "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
         }
     )
