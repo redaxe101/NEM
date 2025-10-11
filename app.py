@@ -433,6 +433,7 @@ def index():
             a {{ color: #0066cc; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
         </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
     <body>
         <h2>NEM Forecast - Deep Learning Transformer Models</h2>
