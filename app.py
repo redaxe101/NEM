@@ -513,7 +513,7 @@ def chart(region):
         </div>
         <div id="err"></div>
 
-        <footer style="max-width: 600px;text-align: justify;">
+        <footer style="text-align: justify;">
         © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
         <a href="https://www.une.edu.au" target="_blank">University of New England</a>, Australia. 
         Forecasts and model outputs are licensed under 
