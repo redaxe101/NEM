@@ -442,7 +442,8 @@ def index():
             style="width: 60px; height: auto; margin-right: 10px;">
         <div style="line-height: 1.4;">
             Developed by <b>Mark Sinclair</b>,<br>
-            University of New England, 2025
+            University of New England, 2025<br>
+            <a href='https://orcid.org/0009-0004-0702-8193'>ORCiD</a>
         </div>
         </div>
 
