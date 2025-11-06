@@ -363,7 +363,7 @@ def fetch_and_predict_loop():
 
                 if not last_weather[region] or datetime.now(
                     tz=ZoneInfo("UTC")
-                ) - last_weather[region] > timedelta(minutes=15):
+                ) - last_weather[region] > timedelta(minutes=60):
                     weather_df = fetch_actual_weather(region)
                     last_weather[region] = datetime.now(tz=ZoneInfo("UTC"))
 
@@ -665,7 +665,9 @@ def predict(region):
     return jsonify(
         {
             "nemTimestamp": [ts.isoformat() for ts in timestamps],
-            "predictionTime": latest_timestamp.isoformat(),
+            "predictionTime": (
+                latest_timestamp.isoformat() if latest_timestamp else None
+            ),
             "spotPrice": _flat(latest_rrp[region]),
             "spikeProbability": _flat(latest_spike_prob[region]),
             "totalDemand": _flat(latest_dem[region]),
