@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
-import tensorflow as tf
+
+# import tensorflow as tf
 import numpy as np
 import os
 import joblib
