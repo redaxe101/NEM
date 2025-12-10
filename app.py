@@ -469,6 +469,7 @@ def index():
     </body>
     </html>
     """
+
     return html, 200, {"Content-Type": "text/html"}
 
 
