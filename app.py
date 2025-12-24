@@ -14,6 +14,9 @@ import requests
 from datetime import datetime, timedelta
 import warnings
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 0)
@@ -133,13 +136,9 @@ def get_model(region):
         import tensorflow as tf
 
         print("⏳ Loading model...")
-        model[region] = tf.keras.models.load_model(model_path, compile=True)
+        model[region] = tf.keras.models.load_model(model_path, compile=False)
         print("✅ Model loaded successfully.")
     return model[region]
-
-
-# model = tf.keras.models.load_model(model_path, compile=True)
-# model.compile(optimizer="AdamW", loss="mse")
 
 
 def add_time_features(df, region):
