@@ -86,6 +86,7 @@ rrp_scaler = {}
 dem_scaler = {}
 model = {}
 latest_rrp = {}
+current_rrp = {}
 latest_spike_prob = {}
 latest_dem = {}
 previous_rrp = {}
@@ -113,6 +114,7 @@ for region in global_regions:
     )
     model[region] = None
     latest_rrp[region] = None
+    current_rrp[region] = None
     latest_spike_prob[region] = None
     latest_dem[region] = None
     previous_rrp[region] = None
@@ -327,7 +329,7 @@ def fetch_actual_weather(region):
 
 
 def fetch_and_predict_loop():
-    global latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
+    global current_rrp, latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
     global model
 
     last_weather = {}
@@ -369,6 +371,10 @@ def fetch_and_predict_loop():
                     last_weather[region] = datetime.now(tz=ZoneInfo("UTC"))
 
                 main_df = df[df["REGION"] == region]
+
+                idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
+                current_rrp[region] = main_df.loc[idx, "RRP"]
+
                 main_df = main_df.resample("30min", label="right", closed="right").agg(
                     {
                         **{col: "mean" for col in df.select_dtypes("number").columns},
@@ -439,24 +445,28 @@ def index():
     <body>
         <h2>NEM Forecast - Deep Learning Transformer Models</h2>
         <div style="display: flex; align-items: center; max-width: 500px;">
-        <img src="/static/une_logo.png" alt="UNE Logo"
-            style="width: 60px; height: auto; margin-right: 10px;">
-        <div style="line-height: 1.4;">
-            Developed by <b>Mark Sinclair</b>,<br>
-            University of New England, 2025<br>
-            <a href='https://orcid.org/0009-0004-0702-8193'>ORCiD</a>
-        </div>
+            <img src="/static/une_logo.png" alt="UNE Logo"
+                style="width: 60px; height: auto; margin-right: 10px;">
+            <div style="line-height: 1.4;">
+                Developed by <b>Mark Sinclair</b>,<br>
+                University of New England, 2025<br>
+                <a href='https://orcid.org/0009-0004-0702-8193'>ORCiD</a>
+            </div>
         </div>
 
-        <p>
-            NSW1 <a href="/predict/NSW1">API</a> | <a href="/chart/NSW1">Chart</a>
-        </p>
-        <p>
-            VIC1 <a href="/predict/VIC1">API</a> | <a href="/chart/VIC1">Chart</a>
-        </p>
-        <p>
-            QLD1 <a href="/predict/QLD1">API</a> | <a href="/chart/QLD1">Chart</a>
-        </p>
+        <div style="max-width: 600px;">
+            <p>Deep learning transformer models for forecasting electricity spot prices, spike probabilities, and demand in the Australian National Electricity Market (NEM).
+            Based on the paper <a href="https://www.mdpi.com/2076-3417/16/1/75" target="_blank">"Learning the Grid: Transformer Architectures for Electricity Price Forecasting in the Australian National Market"</a></p>
+            <p>
+                NSW1 <a href="/predict/NSW1">API</a> | <a href="/chart/NSW1">Chart</a>
+            </p>
+            <p>
+                VIC1 <a href="/predict/VIC1">API</a> | <a href="/chart/VIC1">Chart</a>
+            </p>
+            <p>
+                QLD1 <a href="/predict/QLD1">API</a> | <a href="/chart/QLD1">Chart</a>
+            </p>
+        </div>
 
         <footer style="max-width: 600px;text-align: justify;">
         © 2025 <a href="https://www.linkedin.com/in/markwsinclair/" target="_blank">Mark Sinclair</a>. Developed as part of postgraduate research at the 
@@ -676,6 +686,7 @@ def predict(region):
             "region": region,
             "previousRrp": previous_rrp[region],
             "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
+            "currentRrp": current_rrp[region],
         }
     )
 
