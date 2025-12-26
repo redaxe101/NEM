@@ -288,7 +288,7 @@ def fetch_actual_weather(region):
     """
     Fetch actual weather data from Open-Meteo API
     """
-    print(f"🌤 Fetching weather ...")
+    print(f"🌤 Fetching weather {region}...")
 
     match region:
         case "NSW1":
@@ -330,7 +330,7 @@ def fetch_actual_weather(region):
 
 def fetch_and_predict_loop():
     global current_rrp, current_timestamp, latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
-    global model
+    global model, weather_df
 
     last_weather = {}
     for region in global_regions:
@@ -364,12 +364,6 @@ def fetch_and_predict_loop():
             # first_row.index = first_row.index - pd.Timedelta(minutes=30)
             # df = pd.concat([first_row, df]).sort_index()
             for region in global_regions:
-
-                if not last_weather[region] or datetime.now(
-                    tz=ZoneInfo("UTC")
-                ) - last_weather[region] > timedelta(minutes=60):
-                    weather_df = fetch_actual_weather(region)
-                    last_weather[region] = datetime.now(tz=ZoneInfo("UTC"))
 
                 main_df = df[df["REGION"] == region]
 
@@ -421,6 +415,28 @@ def fetch_and_predict_loop():
             print("❌ Error in prediction loop:", e)
 
         time.sleep(((15 - (time.time() % 60)) % 60) or 60)
+
+
+def fetch_weather_loop():
+    global weather_df
+
+    last_weather = {}
+    for region in global_regions:
+        last_weather[region] = None
+
+    while True:
+        try:
+            for region in global_regions:
+                if not last_weather[region] or datetime.now(
+                    tz=ZoneInfo("UTC")
+                ) - last_weather[region] > timedelta(minutes=60):
+                    weather_df = fetch_actual_weather(region)
+                    last_weather[region] = datetime.now(tz=ZoneInfo("UTC"))
+
+        except Exception as e:
+            print("❌ Error in weather loop:", e)
+
+        time.sleep(3600)
 
 
 def last_saved_model_date(model_path: str, tz="UTC") -> str:
@@ -694,6 +710,7 @@ def predict(region):
     )
 
 
+threading.Thread(target=fetch_weather_loop, daemon=True).start()
 threading.Thread(target=fetch_and_predict_loop, daemon=True).start()
 
 if __name__ == "__main__":
