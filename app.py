@@ -90,6 +90,7 @@ dem_scaler = {}
 model = {}
 latest_rrp = {}
 current_rrp = {}
+current_timestamp = {}
 latest_spike_prob = {}
 latest_dem = {}
 previous_rrp = {}
@@ -328,7 +329,7 @@ def fetch_actual_weather(region):
 
 
 def fetch_and_predict_loop():
-    global current_rrp, latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
+    global current_rrp, current_timestamp, latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
     global model
 
     last_weather = {}
@@ -373,6 +374,7 @@ def fetch_and_predict_loop():
 
                 idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
                 current_rrp[region] = main_df.loc[idx, "RRP"]
+                current_timestamp[region] = idx
 
                 main_df = main_df.resample("30min", label="right", closed="right").agg(
                     {
@@ -686,6 +688,7 @@ def predict(region):
             "previousRrp": previous_rrp[region],
             "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
             "currentRrp": current_rrp[region],
+            "currentTimestamp": current_timestamp[region].isoformat(),
         }
     )
 
