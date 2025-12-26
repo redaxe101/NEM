@@ -136,6 +136,9 @@ def get_model(region):
     if model[region] is None:
         import tensorflow as tf
 
+        tf.config.threading.set_intra_op_parallelism_threads(2)
+        tf.config.threading.set_inter_op_parallelism_threads(2)
+
         print("⏳ Loading model...")
         model[region] = tf.keras.models.load_model(model_path, compile=False)
         print("✅ Model loaded successfully.")
@@ -415,6 +418,7 @@ def fetch_and_predict_loop():
 
         except Exception as e:
             print("❌ Error in prediction loop:", e)
+            time.sleep(60)
 
         time.sleep(((15 - (time.time() % 60)) % 60) or 60)
 
