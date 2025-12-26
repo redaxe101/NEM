@@ -35,24 +35,14 @@ jobs:
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        working-directory: ${{ github.workspace }}
         run: |
-          zip -r release.zip \
-            app.py \
-            requirements.txt \
-            static \
-            models \
-            *.joblib \
-            *.keras \
+          zip -r release.zip app.py requirements.txt static \
+            dec_scaler_i8_*.joblib \
+            dem_scaler_i8_*.joblib \
+            enc_scaler_i8_*.joblib \
+            rrp_scaler_i8_*.joblib \
+            transformer_model_i8_small_*.keras \
             -x "venv/*" "__pycache__/*" "*.pyc"
-
-            - name: Upload artifact for deployment jobs
-              uses: actions/upload-artifact@v4
-              with:
-                name: python-app
-                path: |
-                  release.zip
-                  !venv/
 
   deploy:
     runs-on: ubuntu-latest
