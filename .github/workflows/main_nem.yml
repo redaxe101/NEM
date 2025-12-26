@@ -36,11 +36,10 @@ jobs:
 
       - name: Zip artifact for deployment
         run: |
-          zip -r release.zip . \
+          zip -r release.zip app.py requirements.txt static models \
             -x "venv/*" \
             -x "__pycache__/*" \
-            -x "*.pyc" \
-            -x ".git/*"
+            -x "*.pyc"
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
