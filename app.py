@@ -336,6 +336,7 @@ def fetch_and_predict_loop():
     for region in global_regions:
         model[region] = get_model(region)
         last_weather[region] = None
+
     while True:
         try:
 
