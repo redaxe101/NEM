@@ -335,6 +335,7 @@ def fetch_and_predict_loop():
     global current_rrp, current_timestamp, latest_rrp, latest_spike_prob, latest_dem, latest_timestamp, timestamps
     global model, weather_df
 
+    last_ts = None
     last_weather = {}
     for region in global_regions:
         model[region] = get_model(region)
@@ -342,8 +343,7 @@ def fetch_and_predict_loop():
 
     while True:
         try:
-
-            print("🔁 Fetching AEMO data and running predictions...")
+            print("🔁 Fetching AEMO data...")
 
             response = requests.post(
                 "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
@@ -363,64 +363,80 @@ def fetch_and_predict_loop():
             )
             df = df.set_index("SETTLEMENTDATE")
             df.index = df.index.tz_localize("Australia/Brisbane")
-            # first_row = df.iloc[[0]].copy()
-            # first_row.index = first_row.index - pd.Timedelta(minutes=30)
-            # df = pd.concat([first_row, df]).sort_index()
-            for region in global_regions:
 
-                main_df = df[df["REGION"] == region]
+            main_df = df[df["REGION"] == "NSW1"]
+            idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
+            print(idx)
+            if (
+                last_ts is None
+                or idx != last_ts
+                and idx.minute - 5 <= datetime.now(tz=ZoneInfo("UTC")).minute
+            ):
+                last_ts = idx
 
-                idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
-                current_rrp[region] = main_df.loc[idx, "RRP"]
-                current_timestamp[region] = idx
+                for region in global_regions:
+                    main_df = df[df["REGION"] == region]
 
-                main_df = main_df.resample("30min", label="right", closed="right").agg(
-                    {
-                        **{col: "mean" for col in df.select_dtypes("number").columns},
-                        **{
-                            col: "last"
-                            for col in df.select_dtypes(exclude="number").columns
-                        },
-                    }
-                )
-                for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
-                    new_df = df[df["REGION"] == sample_region]
-                    new_df = add_other_features(new_df)
-                    new_df = new_df.add_suffix("_" + sample_region)
-                    main_df = main_df.join(new_df)
+                    idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
+                    current_rrp[region] = main_df.loc[idx, "RRP"]
+                    current_timestamp[region] = idx
 
-                decoder_input, timestamps = build_decoder_input_from_aemo(
-                    main_df, weather_df, region
-                )
-                encoder_input = build_encoder_input_from_aemo(
-                    main_df, weather_df, region
-                )
+                    main_df = main_df.resample(
+                        "30min", label="right", closed="right"
+                    ).agg(
+                        {
+                            **{
+                                col: "mean"
+                                for col in df.select_dtypes("number").columns
+                            },
+                            **{
+                                col: "last"
+                                for col in df.select_dtypes(exclude="number").columns
+                            },
+                        }
+                    )
+                    for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
+                        new_df = df[df["REGION"] == sample_region]
+                        new_df = add_other_features(new_df)
+                        new_df = new_df.add_suffix("_" + sample_region)
+                        main_df = main_df.join(new_df)
 
-                preds_scaled = model[region].predict(
-                    [encoder_input, decoder_input], verbose=0
-                )
+                    decoder_input, timestamps = build_decoder_input_from_aemo(
+                        main_df, weather_df, region
+                    )
+                    encoder_input = build_encoder_input_from_aemo(
+                        main_df, weather_df, region
+                    )
 
-                latest_rrp[region] = (
-                    rrp_scaler[region]
-                    .inverse_transform(preds_scaled[0].reshape(-1, 1))
-                    .tolist()
-                )
-                latest_dem[region] = (
-                    dem_scaler[region]
-                    .inverse_transform(preds_scaled[1].reshape(-1, 1))
-                    .tolist()
-                )
-                latest_spike_prob[region] = preds_scaled[2].reshape(-1, 1).tolist()
+                    preds_scaled = model[region].predict(
+                        [encoder_input, decoder_input], verbose=0
+                    )
 
-            latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
+                    latest_rrp[region] = (
+                        rrp_scaler[region]
+                        .inverse_transform(preds_scaled[0].reshape(-1, 1))
+                        .tolist()
+                    )
+                    latest_dem[region] = (
+                        dem_scaler[region]
+                        .inverse_transform(preds_scaled[1].reshape(-1, 1))
+                        .tolist()
+                    )
+                    latest_spike_prob[region] = preds_scaled[2].reshape(-1, 1).tolist()
 
-            print("✅ Predictions updated at", latest_timestamp)
+                latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
+                print("✅ Predictions updated at", latest_timestamp)
+                if latest_timestamp.minute % 5 > 0:
+                    time.sleep((5 - latest_timestamp.minute % 5) * 60)
+                else:
+                    time.sleep(5 * 60 - 5)
+                # time.sleep(((20 - (time.time() % 60)) % 60) or 60)
+            else:
+                time.sleep(10)
 
         except Exception as e:
             print("❌ Error in prediction loop:", e)
-            time.sleep(60)
-
-        time.sleep(((15 - (time.time() % 60)) % 60) or 60)
+            time.sleep(5)
 
 
 def fetch_weather_loop():
@@ -716,6 +732,7 @@ def predict(region):
     )
 
 
+print("🚀 Starting background threads...")
 threading.Thread(target=fetch_weather_loop, daemon=True).start()
 threading.Thread(target=fetch_and_predict_loop, daemon=True).start()
 
