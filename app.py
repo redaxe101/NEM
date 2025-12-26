@@ -393,7 +393,9 @@ def fetch_and_predict_loop():
                     main_df, weather_df, region
                 )
 
-                preds_scaled = model[region].predict([encoder_input, decoder_input])
+                preds_scaled = model[region].predict(
+                    [encoder_input, decoder_input], verbose=0
+                )
 
                 latest_rrp[region] = (
                     rrp_scaler[region]
@@ -409,7 +411,7 @@ def fetch_and_predict_loop():
 
             latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
 
-            print("✅ Prediction updated at", latest_timestamp)
+            print("✅ Predictions updated at", latest_timestamp)
 
         except Exception as e:
             print("❌ Error in prediction loop:", e)
