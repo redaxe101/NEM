@@ -343,28 +343,36 @@ def fetch_and_predict_loop():
 
     while True:
         try:
-            print("🔁 Fetching AEMO data...")
+            latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
+            print(f"🔁 Fetching AEMO data...{latest_timestamp}")
 
-            response = requests.post(
-                "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
-                json={"timeScale": ["30MIN"]},
-                timeout=10,
+            response = requests.get(
+                "https://dashboards.public.aemo.com.au/NEM/v1/PWS/NEMDashboard/priceAndDemand?timescale=30MIN",
+                timeout=5,
+                headers={"X-Api-Key": "0ae2748cec08449bb5b3b31b577f71e2"},
             )
+            # response = requests.post(
+            #     "https://visualisations.aemo.com.au/aemo/apps/api/report/5MIN",
+            #     json={"timeScale": ["30MIN"]},
+            #     timeout=10,
+            # )
             response.raise_for_status()
             forecasts_raw = response.json()
 
-            if "5MIN" not in forecasts_raw:
-                raise ValueError("Missing '5MIN' key in AEMO response")
+            # if "5MIN" not in forecasts_raw:
+            #     raise ValueError("Missing '5MIN' key in AEMO response")
 
-            forecasts = forecasts_raw["5MIN"]
+            forecasts = forecasts_raw["data"]["items"]
             df = pd.DataFrame(forecasts)
+            df.columns = df.columns.str.upper()
             df["SETTLEMENTDATE"] = pd.to_datetime(
-                df["SETTLEMENTDATE"], format="%Y-%m-%dT%H:%M:%S"
+                df["SETTLEMENTDATE"],
+                format="ISO8601",
             )
             df = df.set_index("SETTLEMENTDATE")
-            df.index = df.index.tz_localize("Australia/Brisbane")
+            df.index = df.index.tz_convert("Australia/Brisbane")
 
-            main_df = df[df["REGION"] == "NSW1"]
+            main_df = df[df["REGIONID"] == "NSW1"]
             idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
             print(idx)
             if (
@@ -375,7 +383,7 @@ def fetch_and_predict_loop():
                 last_ts = idx
 
                 for region in global_regions:
-                    main_df = df[df["REGION"] == region]
+                    main_df = df[df["REGIONID"] == region]
 
                     idx = main_df.loc[main_df["PERIODTYPE"] == "ACTUAL"].index.max()
                     current_rrp[region] = main_df.loc[idx, "RRP"]
@@ -396,7 +404,7 @@ def fetch_and_predict_loop():
                         }
                     )
                     for sample_region in ("NSW1", "VIC1", "QLD1", "TAS1", "SA1"):
-                        new_df = df[df["REGION"] == sample_region]
+                        new_df = df[df["REGIONID"] == sample_region]
                         new_df = add_other_features(new_df)
                         new_df = new_df.add_suffix("_" + sample_region)
                         main_df = main_df.join(new_df)
@@ -424,15 +432,13 @@ def fetch_and_predict_loop():
                     )
                     latest_spike_prob[region] = preds_scaled[2].reshape(-1, 1).tolist()
 
-                latest_timestamp = datetime.now(tz=ZoneInfo("UTC"))
-                print("✅ Predictions updated at", latest_timestamp)
+                print("✅ Predictions updated.")
                 if latest_timestamp.minute % 5 > 0:
                     time.sleep((5 - latest_timestamp.minute % 5) * 60)
                 else:
-                    time.sleep(5 * 60 - 5)
-                # time.sleep(((20 - (time.time() % 60)) % 60) or 60)
+                    time.sleep(5 * 60 - 7)
             else:
-                time.sleep(10)
+                time.sleep(3)
 
         except Exception as e:
             print("❌ Error in prediction loop:", e)
@@ -723,7 +729,7 @@ def predict(region):
             "spotPrice": _flat(latest_rrp[region]),
             "spikeProbability": _flat(latest_spike_prob[region]),
             "totalDemand": _flat(latest_dem[region]),
-            "region": region,
+            "REGIONID": region,
             "previousRrp": previous_rrp[region],
             "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
             "currentRrp": current_rrp[region],
