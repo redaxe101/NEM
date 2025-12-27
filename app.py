@@ -481,7 +481,7 @@ def index():
         <meta charset="UTF-8">
         <title>NEM Forecast</title>
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 2em; line-height: 1.6; color: #333; }}
+            body {{ font-family: Arial, sans-serif; margin: 1.5em; line-height: 1.6; color: #333; }}
             footer {{ margin-top: 2em; font-size: 0.85em; color: #777; border-top: 1px solid #ccc; padding-top: 1em; }}
             a {{ color: #0066cc; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
@@ -729,7 +729,7 @@ def predict(region):
             "spotPrice": _flat(latest_rrp[region]),
             "spikeProbability": _flat(latest_spike_prob[region]),
             "totalDemand": _flat(latest_dem[region]),
-            "REGIONID": region,
+            "region": region,
             "previousRrp": previous_rrp[region],
             "previousTimestamp": [ts.isoformat() for ts in previous_timestamp],
             "currentRrp": current_rrp[region],
