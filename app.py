@@ -579,7 +579,7 @@ def chart(region):
         <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a> — 
         free for use and redistribution, including commercial use, with attribution. 
         Based on data © Australian Energy Market Operator (AEMO) and © Open-Meteo Weather API, licensed under 
-        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>.
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>. 
         </footer>   
     </div>
 
